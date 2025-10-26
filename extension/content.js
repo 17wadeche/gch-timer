@@ -1,6 +1,6 @@
 // GCH Work Timer - content script
 (() => {
-  const API_URL = "https://gch-timer-api.onrender.com"; // <- CHANGE THIS
+  const API_URL = "https://gch-timer-api.onrender.com/ingest"; // <- CHANGE THIS
   const IDLE_MS = 5 * 60 * 1000;   // idle after 5 minutes without input
   const TICK_MS = 1000;            // accrual resolution
   const HEARTBEAT_MS = 60 * 1000;  // send every minute

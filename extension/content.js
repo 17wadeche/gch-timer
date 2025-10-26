@@ -1,4 +1,7 @@
 (() => {
+  if (window.top !== window.self) return;
+  if (window.__gchTimerBooted) return;
+  window.__gchTimerBooted = true;
   const API_URL = "https://gch-timer-api.onrender.com/ingest";
   const IDLE_MS = 5 * 60 * 1000, TICK_MS = 1000, HEARTBEAT_MS = 60 * 1000;
   const EMAIL_KEY = "gch_timer_email";
@@ -71,6 +74,13 @@
     if (now - lastActivity <= IDLE_MS) activeMs += (now - lastTick);
     lastTick = now;
   }
+  function post(body) {
+    return fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+  }
   function send(reason, sync=false) {
     const payload = {
       ts: new Date().toISOString(),
@@ -86,9 +96,17 @@
     const body = JSON.stringify(payload);
     if (sync && navigator.sendBeacon) {
       navigator.sendBeacon(API_URL, new Blob([body], { type: "application/json" }));
-    } else {
-      fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body })
-        .catch(() => {});
+      return;
+    }
+    post(body).catch(() => {
+      setTimeout(() => post(body).catch(() => {}), 1000);
+    });
+  }
+  let lastSentActiveMs = 0;
+  function maybeSend(reason) {
+    if (activeMs > lastSentActiveMs) {
+      lastSentActiveMs = activeMs;
+      send(reason);
     }
   }
   chrome.storage.sync.get([EMAIL_KEY, OU_KEY], (res) => {
@@ -105,8 +123,8 @@
     lastTick = Date.now();
     send("open");
     setInterval(() => accrue(), 1000);
-    setInterval(() => { accrue(); refreshKeys(); send("heartbeat"); }, HEARTBEAT_MS);
-    document.addEventListener("visibilitychange", () => { accrue(); send("visibility"); });
+    setInterval(() => { accrue(); refreshKeys(); maybeSend("heartbeat"); }, HEARTBEAT_MS);
+    document.addEventListener("visibilitychange", () => { accrue(); maybeSend("visibility"); });
     window.addEventListener("beforeunload", () => { accrue(); send("unload", true); });
   });
 })();

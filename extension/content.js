@@ -8,7 +8,7 @@
     try {
       const el = document.querySelector("a.GUIDE-sideNav");
       const t = el?.textContent?.trim() || "";
-      if (/^\d{6,}$/.test(t)) return t;           // numeric id like 608623294
+      if (/^\d{6,}$/.test(t)) return t; 
     } catch {}
     return "";
   }

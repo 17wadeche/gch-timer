@@ -1,96 +1,96 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-import sqlite3, os, io, json
+# server/main.py
+import os, sqlite3, io
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+from datetime import datetime
 DB_PATH = os.getenv("DB_PATH", "events.db")
 app = FastAPI(title="GCH Timer API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],             # tighten later if you want
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+class Event(BaseModel):
+    ts: str
+    email: str
+    complaint_id: str | None = None
+    section: str | None = None
+    reason: str
+    active_ms: int
+    page: str | None = None
+    session_id: str
+def _conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 def init_db():
-    con = sqlite3.connect(DB_PATH)
-    con.execute("""
-      CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY,
-        received_at TEXT,
-        ts TEXT,
-        email TEXT,
-        complaint_id TEXT,
-        reason TEXT,
-        active_ms INTEGER,
-        page TEXT,
-        session_id TEXT
-      );
+    con = _conn()
+    cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS events(
+            ts TEXT,
+            email TEXT,
+            complaint_id TEXT,
+            section TEXT,
+            reason TEXT,
+            active_ms INTEGER,
+            page TEXT,
+            session_id TEXT
+        )
     """)
-    con.commit()
-    con.close()
+    try:
+        cur.execute("ALTER TABLE events ADD COLUMN section TEXT")
+    except sqlite3.OperationalError:
+        pass
+    con.commit(); con.close()
 init_db()
 @app.get("/")
 def root():
     return {"ok": True, "message": "GCH Timer API"}
 @app.post("/ingest")
-async def ingest(req: Request):
-    try:
-        j = await req.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
-    fields = (
-        j.get("ts",""),
-        j.get("email",""),
-        j.get("complaint_id",""),
-        j.get("reason",""),
-        int(j.get("active_ms",0)),
-        j.get("page",""),
-        j.get("session_id",""),
-    )
-    con = sqlite3.connect(DB_PATH)
-    con.execute(
-        """INSERT INTO events
-           (received_at, ts, email, complaint_id, reason, active_ms, page, session_id)
-           VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)""",
-        fields
-    )
-    con.commit()
-    con.close()
+def ingest(ev: Event):
+    con = _conn(); cur = con.cursor()
+    cur.execute("""
+        INSERT INTO events (ts,email,complaint_id,section,reason,active_ms,page,session_id)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (ev.ts, ev.email, ev.complaint_id or "", ev.section or "", ev.reason,
+          ev.active_ms, ev.page or "", ev.session_id))
+    con.commit(); con.close()
     return {"ok": True}
 @app.get("/sessions")
 def sessions():
-    q = """
-      SELECT session_id, email, complaint_id, MAX(active_ms) AS active_ms
-      FROM events
-      GROUP BY session_id, email, complaint_id
-      ORDER BY MAX(rowid) DESC
-    """
-    con = sqlite3.connect(DB_PATH)
-    cur = con.execute(q)
-    cols = [c[0] for c in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    con.close()
-    return rows
+    """Aggregate per session (kept for compatibility)."""
+    con = _conn(); cur = con.cursor()
+    cur.execute("""
+        SELECT session_id, email, complaint_id, SUM(active_ms) AS active_ms
+        FROM events
+        GROUP BY session_id, email, complaint_id
+        ORDER BY MAX(ts) DESC
+    """)
+    rows = cur.fetchall(); con.close()
+    return [{"session_id": r[0], "email": r[1], "complaint_id": r[2], "active_ms": r[3] or 0} for r in rows]
+@app.get("/sessions_by_section")
+def sessions_by_section():
+    """Aggregate by complaint + section (for dashboard chart)."""
+    con = _conn(); cur = con.cursor()
+    cur.execute("""
+        SELECT email, complaint_id, section, SUM(active_ms) AS active_ms
+        FROM events
+        GROUP BY email, complaint_id, section
+        HAVING section <> ''
+        ORDER BY MAX(ts) DESC
+    """)
+    rows = cur.fetchall(); con.close()
+    return [{"email": r[0], "complaint_id": r[1], "section": r[2], "active_ms": r[3] or 0} for r in rows]
 @app.get("/export.xlsx")
 def export_xlsx():
-    import xlsxwriter
-    con = sqlite3.connect(DB_PATH)
-    cur = con.execute("SELECT * FROM events ORDER BY id DESC")
-    cols = [c[0] for c in cur.description]
-    data = cur.fetchall()
+    import pandas as pd
+    con = _conn()
+    df = pd.read_sql_query("SELECT * FROM events", con)
     con.close()
-    buf = io.BytesIO()
-    wb = xlsxwriter.Workbook(buf, {'in_memory': True})
-    ws = wb.add_worksheet('events')
-    header_fmt = wb.add_format({'bold': True})
-    for j, name in enumerate(cols):
-        ws.write(0, j, name, header_fmt)
-    for i, row in enumerate(data, start=1):
-        for j, val in enumerate(row):
-            ws.write(i, j, val)
-    wb.close()
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="xlsxwriter") as w:
+        df.to_excel(w, index=False, sheet_name="events")
+        (df.groupby(["email","complaint_id"], as_index=False)["active_ms"].sum()
+           .to_excel(w, index=False, sheet_name="by_complaint"))
+        (df[df["section"].astype(str)!=""]
+           .groupby(["complaint_id","section"], as_index=False)["active_ms"].sum()
+           .to_excel(w, index=False, sheet_name="by_section"))
+    out.seek(0)
+    return StreamingResponse(out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=events.xlsx"}
-    )
+        headers={"Content-Disposition": 'attachment; filename="export.xlsx"'})

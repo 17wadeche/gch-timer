@@ -9,6 +9,7 @@ app = FastAPI(title="GCH Timer API")
 class Event(BaseModel):
     ts: str
     email: str
+    ou: str | None = None  
     complaint_id: str | None = None
     section: str | None = None
     reason: str
@@ -24,6 +25,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS events(
             ts TEXT,
             email TEXT,
+            ou TEXT,
             complaint_id TEXT,
             section TEXT,
             reason TEXT,
@@ -45,37 +47,35 @@ def root():
 def ingest(ev: Event):
     con = _conn(); cur = con.cursor()
     cur.execute("""
-        INSERT INTO events (ts,email,complaint_id,section,reason,active_ms,page,session_id)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (ev.ts, ev.email, ev.complaint_id or "", ev.section or "", ev.reason,
-          ev.active_ms, ev.page or "", ev.session_id))
+        INSERT INTO events (ts,email,ou,complaint_id,section,reason,active_ms,page,session_id)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (ev.ts, ev.email, (ev.ou or ""), (ev.complaint_id or ""), (ev.section or ""),
+        ev.reason, ev.active_ms, (ev.page or ""), ev.session_id))
     con.commit(); con.close()
     return {"ok": True}
 @app.get("/sessions")
 def sessions():
-    """Aggregate per session (kept for compatibility)."""
     con = _conn(); cur = con.cursor()
     cur.execute("""
-        SELECT session_id, email, complaint_id, SUM(active_ms) AS active_ms
+        SELECT session_id, email, ou, complaint_id, SUM(active_ms) AS active_ms
         FROM events
-        GROUP BY session_id, email, complaint_id
+        GROUP BY session_id, email, ou, complaint_id
         ORDER BY MAX(ts) DESC
     """)
     rows = cur.fetchall(); con.close()
-    return [{"session_id": r[0], "email": r[1], "complaint_id": r[2], "active_ms": r[3] or 0} for r in rows]
+    return [{"session_id": r[0], "email": r[1], "ou": r[2], "complaint_id": r[3], "active_ms": r[4] or 0} for r in rows]
 @app.get("/sessions_by_section")
 def sessions_by_section():
-    """Aggregate by complaint + section (for dashboard chart)."""
     con = _conn(); cur = con.cursor()
     cur.execute("""
-        SELECT email, complaint_id, section, SUM(active_ms) AS active_ms
+        SELECT email, ou, complaint_id, section, SUM(active_ms) AS active_ms
         FROM events
-        GROUP BY email, complaint_id, section
+        GROUP BY email, ou, complaint_id, section
         HAVING section <> ''
         ORDER BY MAX(ts) DESC
     """)
     rows = cur.fetchall(); con.close()
-    return [{"email": r[0], "complaint_id": r[1], "section": r[2], "active_ms": r[3] or 0} for r in rows]
+    return [{"email": r[0], "ou": r[1], "complaint_id": r[2], "section": r[3], "active_ms": r[4] or 0} for r in rows]
 @app.get("/export.xlsx")
 def export_xlsx():
     import pandas as pd

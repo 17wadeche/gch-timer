@@ -51,7 +51,7 @@
     const nameOnly = first.split(":")[0];     // keep left part before colon
     return nameOnly.trim();
   }
-  let email;
+  let email, ou;  
   let lastActivity = Date.now(), lastTick = Date.now(), activeMs = 0;
   const sessionId = Math.random().toString(36).slice(2);
   let complaintId = "", section = "";
@@ -74,6 +74,7 @@
     const payload = {
       ts: new Date().toISOString(),
       email: email || "",
+      ou: ou || "",
       complaint_id: complaintId || "",
       section: section || "",
       reason,
@@ -89,11 +90,12 @@
         .catch(() => {});
     }
   }
-  chrome.storage.sync.get(["gch_timer_email"], (res) => {
-    email = res["gch_timer_email"];
+  chrome.storage.sync.get([EMAIL_KEY, OU_KEY], (res) => {
+    email = res[EMAIL_KEY];
+    ou = res[OU_KEY] || "";
     if (!email) {
       email = prompt("Enter your work email for GCH Timer:");
-      if (email) chrome.storage.sync.set({ gch_timer_email: email });
+      if (email) chrome.storage.sync.set({ [EMAIL_KEY]: email });
     }
     refreshKeys();
     const mo = new MutationObserver(refreshKeys);

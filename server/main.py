@@ -2,18 +2,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 import sqlite3, os, io
-
 DB_PATH = os.getenv("DB_PATH", "events.db")
-
 app = FastAPI(title="GCH Timer API")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten to your Streamlit/extension origins if desired
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 def init_db():
     con = sqlite3.connect(DB_PATH)
     con.execute("""
@@ -31,20 +27,16 @@ def init_db():
     """)
     con.commit()
     con.close()
-
 init_db()
-
 @app.get("/")
 def root():
     return {"ok": True, "message": "GCH Timer API"}
-
 @app.post("/ingest")
 async def ingest(req: Request):
     try:
         j = await req.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
-
     fields = (
         j.get("ts",""),
         j.get("email",""),
@@ -64,10 +56,8 @@ async def ingest(req: Request):
     con.commit()
     con.close()
     return {"ok": True}
-
 @app.get("/sessions")
 def sessions():
-    """Reduce to one row per session (max active_ms)."""
     q = """
       SELECT session_id, email, complaint_id, MAX(active_ms) AS active_ms
       FROM events
@@ -80,20 +70,16 @@ def sessions():
     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     con.close()
     return rows
-
 @app.get("/export.xlsx")
 def export_xlsx():
-    """Download all raw events as Excel."""
     import pandas as pd
     con = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM events ORDER BY id DESC", con)
     con.close()
-
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as w:
         df.to_excel(w, index=False, sheet_name="events")
     out.seek(0)
-
     return StreamingResponse(
         out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

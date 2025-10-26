@@ -1,12 +1,12 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
-import sqlite3, os, io
+import sqlite3, os, io, json
 DB_PATH = os.getenv("DB_PATH", "events.db")
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten to your Streamlit/extension origins if desired
+    allow_origins=["*"],             # tighten later if you want
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,16 +72,25 @@ def sessions():
     return rows
 @app.get("/export.xlsx")
 def export_xlsx():
-    import pandas as pd
+    import xlsxwriter
     con = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM events ORDER BY id DESC", con)
+    cur = con.execute("SELECT * FROM events ORDER BY id DESC")
+    cols = [c[0] for c in cur.description]
+    data = cur.fetchall()
     con.close()
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine="xlsxwriter") as w:
-        df.to_excel(w, index=False, sheet_name="events")
-    out.seek(0)
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {'in_memory': True})
+    ws = wb.add_worksheet('events')
+    header_fmt = wb.add_format({'bold': True})
+    for j, name in enumerate(cols):
+        ws.write(0, j, name, header_fmt)
+    for i, row in enumerate(data, start=1):
+        for j, val in enumerate(row):
+            ws.write(i, j, val)
+    wb.close()
+    buf.seek(0)
     return StreamingResponse(
-        out,
+        buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=events.xlsx"}
     )

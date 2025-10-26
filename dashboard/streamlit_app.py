@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io, requests
-API_BASE = "https://YOUR-RENDER-APP.onrender.com"  # <- CHANGE THIS
+API_BASE = "https://gch-timer-api.onrender.com"  # <- CHANGE THIS
 st.set_page_config(page_title="GCH Work Time", layout="wide")
 st.title("GCH Work Time Dashboard")
 @st.cache_data(ttl=60)

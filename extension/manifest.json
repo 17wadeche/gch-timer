@@ -9,8 +9,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://gch.medtronic.com/complaints/*",
-        "https://gch.*.medtronic.com/complaints/*"
+        "https://crm.medtronic.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

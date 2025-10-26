@@ -2,12 +2,11 @@ import io
 import requests
 import pandas as pd
 import streamlit as st
-API_BASE = "https://gch-timer-api.onrender.com"  # your live API
+API_BASE = st.secrets.get("API_BASE", "https://gch-timer-api.onrender.com")
 st.set_page_config(page_title="GCH Work Time", layout="wide")
 st.title("GCH Work Time Dashboard")
 @st.cache_data(ttl=60)
 def fetch_sessions(api_base: str) -> pd.DataFrame:
-    """Fetch aggregated sessions from the API and compute active_minutes."""
     r = requests.get(f"{api_base}/sessions", timeout=20)
     r.raise_for_status()
     df = pd.DataFrame(r.json())

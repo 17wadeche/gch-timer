@@ -2,6 +2,7 @@
   const API_URL = "https://gch-timer-api.onrender.com/ingest";
   const IDLE_MS = 5 * 60 * 1000, TICK_MS = 1000, HEARTBEAT_MS = 60 * 1000;
   const EMAIL_KEY = "gch_timer_email";
+  const OU_KEY   = "gch_timer_ou";
   const DEBUG = false; // turn off console noise
   const log = (...a) => { if (DEBUG) console.log("[GCH Timer]", ...a); };
   function fromGuideSideNav() {

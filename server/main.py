@@ -1,16 +1,15 @@
 # server/main.py
 import os, sqlite3, io
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
-from datetime import datetime
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 DB_PATH = os.getenv("DB_PATH", "events.db")
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://crm.medtronic.com"],      # exact origin
-    allow_origin_regex=r"https://.*\.medtronic\.com", # any subdomain (optional but helpful)
+    allow_origins=["https://crm.medtronic.com"],
+    allow_origin_regex=r"https://.*\.medtronic\.com",
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
@@ -18,18 +17,18 @@ app.add_middleware(
 class Event(BaseModel):
     ts: str
     email: str
-    ou: str | None = None  
+    ou: str | None = None
     complaint_id: str | None = None
     section: str | None = None
     reason: str
     active_ms: int
+    idle_ms: int = 0              # NEW
     page: str | None = None
     session_id: str
 def _conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 def init_db():
-    con = _conn()
-    cur = con.cursor()
+    con = _conn(); cur = con.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS events(
             ts TEXT,
@@ -39,14 +38,15 @@ def init_db():
             section TEXT,
             reason TEXT,
             active_ms INTEGER,
+            idle_ms INTEGER,
             page TEXT,
             session_id TEXT
         )
     """)
-    try:
-        cur.execute("ALTER TABLE events ADD COLUMN section TEXT")
-    except sqlite3.OperationalError:
-        pass
+    try: cur.execute("ALTER TABLE events ADD COLUMN section TEXT")
+    except sqlite3.OperationalError: pass
+    try: cur.execute("ALTER TABLE events ADD COLUMN idle_ms INTEGER DEFAULT 0")
+    except sqlite3.OperationalError: pass
     con.commit(); con.close()
 init_db()
 @app.get("/")
@@ -56,35 +56,49 @@ def root():
 def ingest(ev: Event):
     con = _conn(); cur = con.cursor()
     cur.execute("""
-        INSERT INTO events (ts,email,ou,complaint_id,section,reason,active_ms,page,session_id)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, (ev.ts, ev.email, (ev.ou or ""), (ev.complaint_id or ""), (ev.section or ""),
-        ev.reason, ev.active_ms, (ev.page or ""), ev.session_id))
+        INSERT INTO events (ts,email,ou,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (ev.ts, ev.email, ev.ou or "", ev.complaint_id or "", ev.section or "", ev.reason,
+          int(ev.active_ms), int(ev.idle_ms or 0), ev.page or "", ev.session_id))
     con.commit(); con.close()
     return {"ok": True}
 @app.get("/sessions")
 def sessions():
     con = _conn(); cur = con.cursor()
     cur.execute("""
-        SELECT session_id, email, ou, complaint_id, SUM(active_ms) AS active_ms
+        SELECT
+          session_id, email, ou, complaint_id,
+          MIN(ts) AS start_ts,
+          SUM(active_ms) AS active_ms,
+          SUM(idle_ms)   AS idle_ms
         FROM events
         GROUP BY session_id, email, ou, complaint_id
         ORDER BY MAX(ts) DESC
     """)
     rows = cur.fetchall(); con.close()
-    return [{"session_id": r[0], "email": r[1], "ou": r[2], "complaint_id": r[3], "active_ms": r[4] or 0} for r in rows]
+    return [
+        {
+            "session_id": r[0], "email": r[1], "ou": r[2],
+            "complaint_id": r[3], "start_ts": r[4],
+            "active_ms": r[5] or 0, "idle_ms": r[6] or 0
+        }
+        for r in rows
+    ]
 @app.get("/sessions_by_section")
 def sessions_by_section():
     con = _conn(); cur = con.cursor()
     cur.execute("""
         SELECT email, ou, complaint_id, section, SUM(active_ms) AS active_ms
         FROM events
+        WHERE TRIM(IFNULL(section,'')) <> ''
         GROUP BY email, ou, complaint_id, section
-        HAVING section <> ''
         ORDER BY MAX(ts) DESC
     """)
     rows = cur.fetchall(); con.close()
-    return [{"email": r[0], "ou": r[1], "complaint_id": r[2], "section": r[3], "active_ms": r[4] or 0} for r in rows]
+    return [
+        {"email": r[0], "ou": r[1], "complaint_id": r[2], "section": r[3], "active_ms": r[4] or 0}
+        for r in rows
+    ]
 @app.get("/export.xlsx")
 def export_xlsx():
     import pandas as pd
@@ -94,12 +108,14 @@ def export_xlsx():
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as w:
         df.to_excel(w, index=False, sheet_name="events")
-        (df.groupby(["email","complaint_id"], as_index=False)["active_ms"].sum()
-           .to_excel(w, index=False, sheet_name="by_complaint"))
+        (df.groupby(["email","complaint_id"], as_index=False)[["active_ms","idle_ms"]].sum()
+            .to_excel(w, index=False, sheet_name="by_complaint"))
         (df[df["section"].astype(str)!=""]
            .groupby(["complaint_id","section"], as_index=False)["active_ms"].sum()
            .to_excel(w, index=False, sheet_name="by_section"))
     out.seek(0)
-    return StreamingResponse(out,
+    return StreamingResponse(
+        out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="export.xlsx"'})
+        headers={"Content-Disposition": 'attachment; filename="export.xlsx"'}
+    )

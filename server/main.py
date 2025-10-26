@@ -4,8 +4,17 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
 DB_PATH = os.getenv("DB_PATH", "events.db")
 app = FastAPI(title="GCH Timer API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://crm.medtronic.com"],      # exact origin
+    allow_origin_regex=r"https://.*\.medtronic\.com", # any subdomain (optional but helpful)
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 class Event(BaseModel):
     ts: str
     email: str

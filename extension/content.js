@@ -2,13 +2,13 @@
   const API_URL = "https://gch-timer-api.onrender.com/ingest";
   const IDLE_MS = 5 * 60 * 1000, TICK_MS = 1000, HEARTBEAT_MS = 60 * 1000;
   const EMAIL_KEY = "gch_timer_email";
-  const DEBUG = true;
-  const log = (...a) => DEBUG && console.log("[GCH Timer]", ...a);
+  const DEBUG = false; // turn off console noise
+  const log = (...a) => { if (DEBUG) console.log("[GCH Timer]", ...a); };
   function fromGuideSideNav() {
     try {
       const el = document.querySelector("a.GUIDE-sideNav");
       const t = el?.textContent?.trim() || "";
-      if (/^\d{6,}$/.test(t)) return t; 
+      if (/^\d{6,}$/.test(t)) return t;
     } catch {}
     return "";
   }
@@ -42,16 +42,24 @@
   function findComplaintId() {
     return fromGuideSideNav() || fromUrl() || fromTitle() || fromText() || "";
   }
+  function findSection() {
+    const el = document.querySelector("#bcTitle");
+    if (!el) return "";
+    const raw = (el.getAttribute("title") || el.innerText || "").trim();
+    if (!raw) return "";
+    const first = raw.split(",")[0];          // "Product Analysis:8317..." or "Reportability Decision:8283..."
+    const nameOnly = first.split(":")[0];     // keep left part before colon
+    return nameOnly.trim();
+  }
   let email;
   let lastActivity = Date.now(), lastTick = Date.now(), activeMs = 0;
   const sessionId = Math.random().toString(36).slice(2);
-  let complaintId = "";
-  function refreshComplaintId() {
-    const found = findComplaintId();
-    if (found && found !== complaintId) {
-      complaintId = found;
-      log("Detected ID:", complaintId);
-    }
+  let complaintId = "", section = "";
+  function refreshKeys() {
+    const c = findComplaintId();
+    const s = findSection();
+    if (c && c !== complaintId) { complaintId = c; log("complaint:", c); }
+    if (s && s !== section)     { section = s; log("section:", s); }
   }
   const onAct = () => (lastActivity = Date.now());
   ["click","keydown","mousemove","wheel","touchstart"].forEach(ev =>
@@ -67,6 +75,7 @@
       ts: new Date().toISOString(),
       email: email || "",
       complaint_id: complaintId || "",
+      section: section || "",
       reason,
       active_ms: Math.round(activeMs),
       page: location.href,
@@ -76,25 +85,24 @@
     if (sync && navigator.sendBeacon) {
       navigator.sendBeacon(API_URL, new Blob([body], { type: "application/json" }));
     } else {
-      fetch(API_URL, { method:"POST", headers:{ "Content-Type":"application/json" }, body })
-        .then(() => log("Sent", reason, payload))
-        .catch(err => log("Send error", err));
+      fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body })
+        .catch(() => {});
     }
   }
-  chrome.storage.sync.get([EMAIL_KEY], (res) => {
-    email = res[EMAIL_KEY];
+  chrome.storage.sync.get(["gch_timer_email"], (res) => {
+    email = res["gch_timer_email"];
     if (!email) {
       email = prompt("Enter your work email for GCH Timer:");
-      if (email) chrome.storage.sync.set({ [EMAIL_KEY]: email });
+      if (email) chrome.storage.sync.set({ gch_timer_email: email });
     }
-    refreshComplaintId();
-    const mo = new MutationObserver(() => refreshComplaintId());
-    if (document.body) mo.observe(document.body, { childList:true, subtree:true });
-    setInterval(refreshComplaintId, 2000);
+    refreshKeys();
+    const mo = new MutationObserver(refreshKeys);
+    if (document.body) mo.observe(document.body, { childList: true, subtree: true });
+    setInterval(refreshKeys, 2000);
     lastTick = Date.now();
     send("open");
-    setInterval(() => accrue(), TICK_MS);
-    setInterval(() => { accrue(); refreshComplaintId(); send("heartbeat"); }, HEARTBEAT_MS);
+    setInterval(() => accrue(), 1000);
+    setInterval(() => { accrue(); refreshKeys(); send("heartbeat"); }, HEARTBEAT_MS);
     document.addEventListener("visibilitychange", () => { accrue(); send("visibility"); });
     window.addEventListener("beforeunload", () => { accrue(); send("unload", true); });
   });

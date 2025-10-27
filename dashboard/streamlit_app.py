@@ -60,9 +60,12 @@ with c2: st.metric("Total IDLE hours",   round(df["Idle Minutes"].sum()/60.0, 2)
 with c3: st.metric("Sessions", int(len(df)))
 with c4: st.metric("Users", int(df["email"].nunique()) if not df.empty else 0)
 st.subheader("Sessions")
+display_df = df.rename(columns={"email": "Email", "ou": "OU"})
 st.dataframe(
-    df[["Start","email","ou","complaint_id","Minutes","Idle Minutes"]].sort_values("Start", ascending=False),
-    use_container_width=True, height=420
+    display_df[["Start", "Email", "OU", "complaint_id", "Minutes", "Idle Minutes"]]
+        .sort_values("Start", ascending=False),
+    use_container_width=True,
+    height=420,
 )
 st.subheader("Active minutes by complaint")
 if not df.empty:

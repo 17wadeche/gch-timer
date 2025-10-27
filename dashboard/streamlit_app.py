@@ -91,13 +91,13 @@ if not sect.empty:
         if s.startswith("regulatory report"):     return "Regulatory Report"
         if s.startswith("regulatory inquiry"):    return "Regulatory Inquiry"
         if s.startswith("product analysis"):      return "Product Analysis"
-        if s.startswith("investigations"):        return "Investigations"
-        if s.startswith("communications"):        return "Communications"
-        if s.startswith("tasks"):                 return "Tasks"
+        if s.startswith("investigation"):        return "Investigation"
+        if s.startswith("communication"):        return "Communication"
+        if s.startswith("task"):                 return "Task"
         return "Other"
     sect["bucket"] = sect["section"].apply(map_bucket)
     palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                      "Product Analysis","Investigations","Communications","Tasks","Other"]
+                      "Product Analysis","Investigation","Communication","Task","Other"]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                       "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
     stacked = alt.Chart(sect).mark_bar().encode(

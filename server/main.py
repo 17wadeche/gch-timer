@@ -7,7 +7,10 @@ from sqlalchemy import create_engine, text
 import pandas as pd
 DB_URL = os.getenv("DATABASE_URL")
 if DB_URL:
-    engine = create_engine(DB_URL, pool_pre_ping=True)   # Neon
+    if "://" in DB_URL and "+" not in DB_URL.split("://", 1)[0]:
+        DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
+        DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    engine = create_engine(DB_URL, pool_pre_ping=True)
 else:
     DB_PATH = os.getenv("DB_PATH", "events.db")          # local/dev
     engine = create_engine(f"sqlite:///{DB_PATH}", pool_pre_ping=True)

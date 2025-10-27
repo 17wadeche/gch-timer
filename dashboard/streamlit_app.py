@@ -11,14 +11,21 @@ def fetch_sessions() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sessions", timeout=TIMEOUT)
     r.raise_for_status()
     df = pd.DataFrame(r.json())
+    schema = ["email", "ou", "complaint_id", "start_ts", "active_ms", "idle_ms",
+              "Minutes", "Idle Minutes", "Start"]
     if df.empty:
-        return pd.DataFrame(columns=["email","ou","complaint_id","start_ts","active_ms","idle_ms"])
-    for col in ("active_ms","idle_ms"):
+        return pd.DataFrame(columns=schema)
+    for col in ("active_ms", "idle_ms"):
+        if col not in df.columns:
+            df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    df["Minutes"] = (df["active_ms"]/60000.0).round(2)
-    df["Idle Minutes"] = (df["idle_ms"]/60000.0).round(2)
-    df["Start"] = pd.to_datetime(df["start_ts"], errors="coerce")
-    return df
+    df["Minutes"] = (df["active_ms"] / 60000.0).round(2)
+    df["Idle Minutes"] = (df["idle_ms"] / 60000.0).round(2)
+    df["Start"] = pd.to_datetime(df.get("start_ts"), errors="coerce")
+    for c in schema:
+        if c not in df.columns:
+            df[c] = pd.Series(dtype="float64" if "Minutes" in c else "object")
+    return df[schema]
 @st.cache_data(ttl=60)
 def fetch_by_section() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sessions_by_section", timeout=TIMEOUT)

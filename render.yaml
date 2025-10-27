@@ -3,7 +3,7 @@ services:
     name: gch-timer-api
     env: python
     plan: free
-    buildCommand: pip install -r server/requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r server/requirements.txt
     startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DB_PATH

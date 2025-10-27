@@ -97,6 +97,7 @@ def sessions_by_section():
     return [dict(r) for r in rows]
 @app.get("/export.xlsx")
 def export_xlsx():
+    import pandas as pd
     with engine.begin() as conn:
         df = pd.read_sql_query("SELECT * FROM events", conn)
     out = io.BytesIO()

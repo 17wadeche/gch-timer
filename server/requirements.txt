@@ -1,6 +1,6 @@
 xlsxwriter==3.2.0
 SQLAlchemy==2.0.36
-psycopg[binary]==3.2.1
+psycopg[binary]>=3.2.12
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pandas==2.2.3

@@ -1,10 +1,16 @@
-# server/main.py
-import os, sqlite3, io
+import os, io
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-DB_PATH = os.getenv("DB_PATH", "events.db")
+from sqlalchemy import create_engine, text
+import pandas as pd
+DB_URL = os.getenv("DATABASE_URL")
+if DB_URL:
+    engine = create_engine(DB_URL, pool_pre_ping=True)   # Neon
+else:
+    DB_PATH = os.getenv("DB_PATH", "events.db")          # local/dev
+    engine = create_engine(f"sqlite:///{DB_PATH}", pool_pre_ping=True)
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
     CORSMiddleware,
@@ -14,6 +20,22 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=False,
 )
+DDL = """
+CREATE TABLE IF NOT EXISTS events (
+  ts           TEXT,
+  email        TEXT,
+  ou           TEXT,
+  complaint_id TEXT,
+  section      TEXT,
+  reason       TEXT,
+  active_ms    BIGINT,
+  idle_ms      BIGINT DEFAULT 0,
+  page         TEXT,
+  session_id   TEXT
+);
+"""
+with engine.begin() as conn:
+    conn.exec_driver_sql(DDL)
 class Event(BaseModel):
     ts: str
     email: str
@@ -22,94 +44,66 @@ class Event(BaseModel):
     section: str | None = None
     reason: str
     active_ms: int
-    idle_ms: int = 0              # NEW
+    idle_ms: int = 0
     page: str | None = None
     session_id: str
-def _conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-def init_db():
-    con = _conn(); cur = con.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS events(
-            ts TEXT,
-            email TEXT,
-            ou TEXT,
-            complaint_id TEXT,
-            section TEXT,
-            reason TEXT,
-            active_ms INTEGER,
-            idle_ms INTEGER,
-            page TEXT,
-            session_id TEXT
-        )
-    """)
-    try: cur.execute("ALTER TABLE events ADD COLUMN section TEXT")
-    except sqlite3.OperationalError: pass
-    try: cur.execute("ALTER TABLE events ADD COLUMN idle_ms INTEGER DEFAULT 0")
-    except sqlite3.OperationalError: pass
-    con.commit(); con.close()
-init_db()
 @app.get("/")
 def root():
     return {"ok": True, "message": "GCH Timer API"}
 @app.post("/ingest")
 def ingest(ev: Event):
-    con = _conn(); cur = con.cursor()
-    cur.execute("""
-        INSERT INTO events (ts,email,ou,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-    """, (ev.ts, ev.email, ev.ou or "", ev.complaint_id or "", ev.section or "", ev.reason,
-          int(ev.active_ms), int(ev.idle_ms or 0), ev.page or "", ev.session_id))
-    con.commit(); con.close()
+    sql = text("""
+        INSERT INTO events
+          (ts,email,ou,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
+        VALUES
+          (:ts,:email,:ou,:complaint_id,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, {
+            "ts": ev.ts, "email": ev.email, "ou": ev.ou or "",
+            "complaint_id": ev.complaint_id or "", "section": ev.section or "",
+            "reason": ev.reason, "active_ms": int(ev.active_ms),
+            "idle_ms": int(ev.idle_ms or 0), "page": ev.page or "",
+            "session_id": ev.session_id
+        })
     return {"ok": True}
 @app.get("/sessions")
 def sessions():
-    con = _conn(); cur = con.cursor()
-    cur.execute("""
-        SELECT
-          session_id, email, ou, complaint_id,
-          MIN(ts) AS start_ts,
-          SUM(active_ms) AS active_ms,
-          SUM(idle_ms)   AS idle_ms
-        FROM events
-        GROUP BY session_id, email, ou, complaint_id
-        ORDER BY MAX(ts) DESC
-    """)
-    rows = cur.fetchall(); con.close()
-    return [
-        {
-            "session_id": r[0], "email": r[1], "ou": r[2],
-            "complaint_id": r[3], "start_ts": r[4],
-            "active_ms": r[5] or 0, "idle_ms": r[6] or 0
-        }
-        for r in rows
-    ]
+    sql = """
+      SELECT
+        session_id, email, ou, complaint_id,
+        MIN(ts) AS start_ts,
+        COALESCE(SUM(active_ms),0) AS active_ms,
+        COALESCE(SUM(idle_ms),0)   AS idle_ms
+      FROM events
+      GROUP BY session_id, email, ou, complaint_id
+      ORDER BY MAX(ts) DESC
+    """
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql(sql).mappings().all()
+    return [dict(r) for r in rows]
 @app.get("/sessions_by_section")
 def sessions_by_section():
-    con = _conn(); cur = con.cursor()
-    cur.execute("""
-        SELECT email, ou, complaint_id, section, SUM(active_ms) AS active_ms
-        FROM events
-        WHERE TRIM(IFNULL(section,'')) <> ''
-        GROUP BY email, ou, complaint_id, section
-        ORDER BY MAX(ts) DESC
-    """)
-    rows = cur.fetchall(); con.close()
-    return [
-        {"email": r[0], "ou": r[1], "complaint_id": r[2], "section": r[3], "active_ms": r[4] or 0}
-        for r in rows
-    ]
+    sql = """
+      SELECT email, ou, complaint_id, section,
+             COALESCE(SUM(active_ms),0) AS active_ms
+      FROM events
+      WHERE TRIM(COALESCE(section,'')) <> ''
+      GROUP BY email, ou, complaint_id, section
+      ORDER BY MAX(ts) DESC
+    """
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql(sql).mappings().all()
+    return [dict(r) for r in rows]
 @app.get("/export.xlsx")
 def export_xlsx():
-    import pandas as pd
-    con = _conn()
-    df = pd.read_sql_query("SELECT * FROM events", con)
-    con.close()
+    with engine.begin() as conn:
+        df = pd.read_sql_query("SELECT * FROM events", conn)
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as w:
         df.to_excel(w, index=False, sheet_name="events")
-        (df.groupby(["email","complaint_id"], as_index=False)[["active_ms","idle_ms"]].sum()
-            .to_excel(w, index=False, sheet_name="by_complaint"))
+        (df.groupby(["email","complaint_id"], as_index=False)[["active_ms","idle_ms"]]
+           .sum().to_excel(w, index=False, sheet_name="by_complaint"))
         (df[df["section"].astype(str)!=""]
            .groupby(["complaint_id","section"], as_index=False)["active_ms"].sum()
            .to_excel(w, index=False, sheet_name="by_section"))

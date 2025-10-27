@@ -1,5 +1,4 @@
 (() => {
-  if (window.top !== window.self) return;
   if (window.__gchTimerBooted) return;
   window.__gchTimerBooted = true;
   const API_URL   = "https://gch-timer-api.onrender.com/ingest";
@@ -9,7 +8,7 @@
   const EMAIL_KEY = "gch_timer_email";
   const OU_KEY    = "gch_timer_ou";
   const ALLOWED_OUS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT"];
-  const DEBUG=false; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
+  const DEBUG=true; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
   function fromGuideSideNav(){ try{
     const el=document.querySelector("a.GUIDE-sideNav"); const t=el?.textContent?.trim()||"";
     if(/^\d{6,}$/.test(t)) return t;

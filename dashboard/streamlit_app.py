@@ -225,13 +225,21 @@ else:
                 st.caption("No activity events recorded for this complaint.")
             else:
                 blocks = collapse_activity_blocks(ev, TZ_NAME)
-                st.dataframe(
+                display_cols = [
+                    "Start (local)", "End (local)", "Activity",
+                    "Active HH:MM:SS", "Idle HH:MM:SS", "Page"
+                ]
+                display_blocks = (
                     blocks.rename(columns={
-                        "Start":"Start (local)",
-                        "Activity":"Activity"
-                    }),
+                        "Start": "Start (local)",
+                        "End": "End (local)",
+                    })[display_cols]
+                )
+                st.dataframe(
+                    display_blocks,
                     use_container_width=True,
                     height=280,
+                    hide_index=True, 
                 )
                 st.markdown("**Activities (totals)**")
                 totals = (ev.assign(section=ev["section"].fillna("").replace("", "Unlabeled"))

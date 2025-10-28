@@ -250,22 +250,6 @@ else:
                     for _, row in totals.iterrows()
                 )
                 st.markdown(lines)
-            if ev.empty:
-                st.caption("No activity events recorded for this complaint.")
-            else:
-                st.markdown("**Timeline (ordered)**")
-                timeline = ev[["ts", "section", "Active HH:MM:SS", "Idle HH:MM:SS", "page"]].copy()
-                timeline = timeline.rename(columns={
-                    "ts": "Timestamp (local)",
-                    "section": "Activity",
-                    "page": "Page"
-                })
-                st.dataframe(
-                    timeline,
-                    use_container_width=True,
-                    height=260,
-                    hide_index=True,   # no index
-                )
 sect = fetch_by_section()
 if not sect.empty:
     if ou_choice != "All OUs":

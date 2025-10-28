@@ -85,7 +85,7 @@ if not sect.empty:
         sect = sect[sect["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
     sect = sect[sect["Minutes"] >= float(min_minutes)]
     def map_bucket(s: str) -> str:
-        if not isinstance(s,str): return "Other"
+        if not isinstance(s,str): return "PLI Level"
         s=s.strip().lower()
         if s.startswith("reportability"):         return "Reportability"
         if s.startswith("regulatory report"):     return "Regulatory Report"

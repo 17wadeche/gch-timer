@@ -127,7 +127,8 @@ with st.sidebar:
     complaint_filter = st.text_input("Complaint/Transaction ID contains", "")
     min_minutes = st.number_input("Min ACTIVE minutes", min_value=0.0, value=0.0, step=0.5)
     if st.button("Force refresh data"):
-        fetch_sessions.clear(); fetch_by_section.clear(); fetch_events_for_complaint.clear(); fetch_sections_by_weekday.clear(); st.experimental_rerun()
+        st.cache_data.clear() 
+        st.rerun()         
 if ou_choice != "All OUs":
     df = df[df["ou"] == ou_choice]
 if email_filter:
@@ -262,8 +263,10 @@ if not wkdf.empty:
         )
     )
     for day in ["Monday","Tuesday","Wednesday","Thursday","Friday"]:
+        st.subheader(day)
         day_df = wkdf[wkdf["weekday"] == day]
         if day_df.empty:
+            st.info(f"No data yet for {day}.")
             continue
         agg = (day_df.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
         agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
@@ -288,7 +291,6 @@ if not wkdf.empty:
             y="active_ms:Q",
             text=alt.Text("Total HHMMSS:N")
         )
-        st.subheader(f"{day}")
         st.altair_chart(stacked + labels_day + avg_day_rule + avg_day_text, use_container_width=True)
 st.subheader("Export")
 sessions_view = display_df[["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()

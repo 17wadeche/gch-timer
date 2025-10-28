@@ -5,6 +5,7 @@ import altair as alt
 from datetime import timedelta
 API_BASE = st.secrets.get("API_BASE", "https://gch-timer-api.onrender.com")
 TIMEOUT = 30
+TZ_NAME = "America/Chicago"
 st.set_page_config(page_title="GCH Work Time", layout="wide")
 st.title("GCH Work Time")
 def fmt_hms_from_ms(ms: int | float) -> str:
@@ -30,7 +31,8 @@ def fetch_sessions() -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    df["Start"] = pd.to_datetime(df.get("start_ts"), errors="coerce")
+    start = pd.to_datetime(df.get("start_ts"), errors="coerce", utc=True)
+    df["Start"] = start.dt.tz_convert(TZ_NAME)
     df["Active Minutes"] = (df["active_ms"] / 60000.0)
     df["Idle Minutes"] = (df["idle_ms"] / 60000.0)
     df["Active HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
@@ -76,7 +78,7 @@ def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     df = pd.DataFrame(r.json())
     if df.empty:
         return df
-    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
+    df["ts"] = pd.to_datetime(df["ts"], errors="coerce", utc=True).dt.tz_convert(TZ_NAME)
     for c in ("active_ms","idle_ms"):
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     df["Active HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
@@ -164,21 +166,7 @@ if not sect.empty:
     if complaint_filter:
         sect = sect[sect["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
     sect = sect[sect["Minutes"] >= float(min_minutes)]
-    def map_bucket(s: str) -> str:
-        if not isinstance(s,str): return "PLI Level"
-        s=s.strip().lower()
-        if s.startswith("reportability"):         return "Reportability"
-        if s.startswith("regulatory report"):     return "Regulatory Report"
-        if s.startswith("regulatory inquiry"):    return "Regulatory Inquiry"
-        if s.startswith("product analysis"):      return "Product Analysis"
-        if s.startswith("investigation"):         return "Investigation"
-        if s.startswith("communication"):         return "Communication"
-        if s.startswith("task"):                  return "Task"
-        return "PLI Level"
-    sect["bucket"] = sect["section"].apply(map_bucket)
-    agg = (sect.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
-    agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
-    totals = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
+    totals = (sect.groupby("complaint_id", as_index=False)["active_ms"].sum())
     totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
     axis = alt.Axis(
         title="Active (HH:MM:SS)",
@@ -188,27 +176,21 @@ if not sect.empty:
             "pad(floor((datum.value%60000)/1000), 2)"
         )
     )
-    palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                      "Product Analysis","Investigation","Communication","Task","PLI Level"]
-    palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
-                      "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
-    stacked = alt.Chart(agg).mark_bar().encode(
+    bars = alt.Chart(totals).mark_bar().encode(
         x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
-        y=alt.Y("sum(active_ms):Q", axis=axis),
-        color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
+        y=alt.Y("active_ms:Q", axis=axis),
         tooltip=[
             alt.Tooltip("complaint_id:N", title="Complaint"),
-            alt.Tooltip("bucket:N", title="Activity"),
-            alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
+            alt.Tooltip("Total HHMMSS:N", title="Active (HH:MM:SS)")
         ]
-    ).properties(height=380, width="container")
+    ).properties(height=360, width="container")
     labels = alt.Chart(totals).mark_text(dy=-6).encode(
         x="complaint_id:N",
         y="active_ms:Q",
-        text=alt.Text("Total HHMMSS:N", title="Total")
+        text=alt.Text("Total HHMMSS:N")
     )
-    st.subheader("Activity level (stacked)")
-    st.altair_chart(stacked + labels, use_container_width=True)
+    st.subheader("Activity level (totals per complaint)")
+    st.altair_chart(bars + labels, use_container_width=True)
 wkdf = fetch_sections_by_weekday()
 if not wkdf.empty:
     if complaint_filter:

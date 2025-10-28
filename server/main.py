@@ -3,6 +3,7 @@ from email.message import EmailMessage
 from datetime import datetime
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse
+from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -15,14 +16,14 @@ if DB_URL:
         DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(DB_URL, pool_pre_ping=True)
 else:
-    DB_PATH = os.getenv("DB_PATH", "events.db")          # local/dev
+    DB_PATH = os.getenv("DB_PATH", "events.db")
     engine = create_engine(f"sqlite:///{DB_PATH}", pool_pre_ping=True)
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER or "")
-SMTP_TO   = os.getenv("SMTP_TO", "")  # comma-separated; falls back to per-user from data
+SMTP_FROM = os.getenv("SMTP_FROM", "chey.wade@medtronic.com")
+SMTP_TO   = os.getenv("SMTP_TO", "chey.wade@medtronic.com")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
@@ -114,7 +115,7 @@ def sessions_by_section():
         rows = conn.exec_driver_sql(sql).mappings().all()
     return [dict(r) for r in rows]
 @app.get("/events")
-def events_for_complaint(complaint_id: str = Query(...)):
+def events_for_complaint(complaint_id: str):
     sql = text("""
       SELECT ts, email, ou, complaint_id, section, reason, active_ms, idle_ms, page, session_id
       FROM events
@@ -133,9 +134,8 @@ def sections_by_weekday():
         )
     if df.empty:
         return []
-    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
-    df = df.dropna(subset=["ts"])
-    df["weekday"] = df["ts"].dt.day_name()
+    t = pd.to_datetime(df["ts"], errors="coerce", utc=True)
+    df["weekday"] = t.dt.tz_convert("America/Chicago").day_name()
     out = (
         df.groupby(["complaint_id","section","weekday"], as_index=False)["active_ms"]
           .sum()
@@ -183,8 +183,8 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         raise RuntimeError("SMTP not configured or no recipients.")
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = SMTP_FROM
-    msg["To"] = ", ".join(recipients)
+    msg["From"] = SMTP_FROM           # From = chey.wade@medtronic.com (default)
+    msg["To"] = ", ".join(recipients) # To   = chey.wade@medtronic.com (default)
     msg.set_content("Weekly GCH timer export attached.")
     msg.add_attachment(xlsx_bytes,
                        maintype="application",
@@ -198,10 +198,6 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
 def weekly_rollup_job():
     try:
         recipients = [e.strip() for e in SMTP_TO.split(",") if e.strip()]
-        if not recipients:
-            with engine.begin() as conn:
-                emails = conn.exec_driver_sql("SELECT DISTINCT email FROM events WHERE email <> ''").scalars().all()
-            recipients = emails
         xlsx = _export_bytes()
         now = datetime.now(TZ).strftime("%Y-%m-%d")
         _send_email(xlsx, f"GCH Weekly Export – {now}", recipients)

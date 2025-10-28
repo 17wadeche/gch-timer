@@ -238,24 +238,29 @@ if not sect.empty:
     st.subheader("Activity level (totals per complaint)")
     st.altair_chart(bars + labels + avg_rule + avg_text, use_container_width=True)
 wkdf = fetch_sections_by_weekday()
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 if not wkdf.empty:
     if complaint_filter:
-        wkdf = wkdf[wkdf["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
-    wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
+        wkdf = wkdf[wkdf["complaint_id"].astype(str)
+                    .str.contains(complaint_filter, case=False, na=False)]
+    wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)].copy()
     def map_bucket(s: str) -> str:
-        if not isinstance(s, str): return "PLI Level"
+        if not isinstance(s, str):
+            return "PLI Level"
         s = s.strip().lower()
-        if s.startswith("reportability"):         return "Reportability"
-        if s.startswith("regulatory report"):     return "Regulatory Report"
-        if s.startswith("regulatory inquiry"):    return "Regulatory Inquiry"
-        if s.startswith("product analysis"):      return "Product Analysis"
-        if s.startswith("investigation"):         return "Investigation"
-        if s.startswith("communication"):         return "Communication"
-        if s.startswith("task"):                  return "Task"
+        if s.startswith("reportability"):      return "Reportability"
+        if s.startswith("regulatory report"):  return "Regulatory Report"
+        if s.startswith("regulatory inquiry"): return "Regulatory Inquiry"
+        if s.startswith("product analysis"):   return "Product Analysis"
+        if s.startswith("investigation"):      return "Investigation"
+        if s.startswith("communication"):      return "Communication"
+        if s.startswith("task"):               return "Task"
         return "PLI Level"
-    wkdf["bucket"] = wkdf["section"].apply(map_bucket)
-    palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                      "Product Analysis","Investigation","Communication","Task","PLI Level"]
+    wkdf.loc[:, "bucket"] = wkdf["section"].apply(map_bucket)
+    palette_domain = [
+        "Reportability","Regulatory Report","Regulatory Inquiry",
+        "Product Analysis","Investigation","Communication","Task","PLI Level"
+    ]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                       "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
     axis = alt.Axis(
@@ -266,24 +271,33 @@ if not wkdf.empty:
             "pad(floor((datum.value%60000)/1000), 2)"
         )
     )
-    for day in ["Monday","Tuesday","Wednesday","Thursday","Friday"]:
+    for day in DAYS:
         st.subheader(day)
         day_df = wkdf[wkdf["weekday"] == day]
         if day_df.empty:
             st.info(f"No data yet for {day}.")
             continue
-        agg = (day_df.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
+        agg = (
+            day_df.groupby(["complaint_id", "bucket"], as_index=False)["active_ms"]
+                  .sum()
+        )
         agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
-        totals_day = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
+        totals_day = agg.groupby("complaint_id", as_index=False)["active_ms"].sum()
         totals_day["Total HHMMSS"] = totals_day["active_ms"].apply(fmt_hms_from_ms)
         mean_ms_day = int(totals_day["active_ms"].mean()) if not totals_day.empty else 0
-        avg_day_df = pd.DataFrame({"y": [mean_ms_day], "label": [f"Avg {fmt_hms_from_ms(mean_ms_day)}"]})
-        avg_day_rule = alt.Chart(avg_day_df).mark_rule(strokeDash=[6,4]).encode(y="y:Q")
-        avg_day_text = alt.Chart(avg_day_df).mark_text(align="left", dx=6, dy=-6).encode(y="y:Q", text="label:N")
+        avg_day_df = pd.DataFrame({
+            "y": [mean_ms_day],
+            "label": [f"Avg {fmt_hms_from_ms(mean_ms_day)}"]
+        })
+        avg_day_rule = alt.Chart(avg_day_df).mark_rule(strokeDash=[6, 4]).encode(y="y:Q")
+        avg_day_text = alt.Chart(avg_day_df).mark_text(align="left", dx=6, dy=-6)\
+                                            .encode(y="y:Q", text="label:N")
         stacked = alt.Chart(agg).mark_bar().encode(
             x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
             y=alt.Y("sum(active_ms):Q", axis=axis),
-            color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
+            color=alt.Color("bucket:N",
+                            scale=alt.Scale(domain=palette_domain, range=palette_range),
+                            title="Activity"),
             tooltip=[
                 alt.Tooltip("complaint_id:N", title="Complaint"),
                 alt.Tooltip("bucket:N", title="Activity"),
@@ -296,6 +310,10 @@ if not wkdf.empty:
             text=alt.Text("Total HHMMSS:N")
         )
         st.altair_chart(stacked + labels_day + avg_day_rule + avg_day_text, use_container_width=True)
+else:
+    for day in DAYS:
+        st.subheader(day)
+        st.info(f"No data yet for {day}.")
 st.subheader("Export")
 sessions_view = display_df[["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
 weekday_totals_df = (

@@ -272,7 +272,7 @@ else:
             display_blocks = (
                 blocks.rename(columns={
                     "Start": "Start (local)",
-                    "End": "End (local)",
+                    "Counted End": "End (local)",   # <- use the counted end
                 })[display_cols]
             )
             st.dataframe(
@@ -419,6 +419,12 @@ for cid in visible_complaints:
     if not blocks.empty:
         blocks = blocks.copy()
         blocks.insert(0, "Complaint", cid)
+        blocks = blocks.rename(columns={"Counted End": "End"})
+        blocks = blocks[[
+            "Complaint","Start","End","Activity",
+            "Active HH:MM:SS","Idle HH:MM:SS",
+            "Active (ms)","Idle (ms)","Session","Page"
+        ]]
         timeline_rows.append(blocks)
 timeline_df = (
     pd.concat(timeline_rows, ignore_index=True)

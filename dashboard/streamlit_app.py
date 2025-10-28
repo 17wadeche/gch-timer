@@ -33,6 +33,7 @@ def fetch_sessions() -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     start = pd.to_datetime(df.get("start_ts"), errors="coerce", utc=True)
     df["Start"] = start.dt.tz_convert(TZ_NAME)
+    df["Start"] = df["Start"].dt.tz_localize(None)
     df["Active Minutes"] = (df["active_ms"] / 60000.0)
     df["Idle Minutes"] = (df["idle_ms"] / 60000.0)
     df["Active HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
@@ -101,6 +102,7 @@ if email_filter:
 if complaint_filter:
     df = df[df["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
 df = df[df["Active Minutes"] >= float(min_minutes)]
+df = df[df["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
 total_active_ms = int(df["active_ms"].sum()) if not df.empty else 0
 total_idle_ms   = int(df["idle_ms"].sum()) if not df.empty else 0
 sessions_count  = int(len(df))
@@ -167,6 +169,7 @@ if not sect.empty:
     if complaint_filter:
         sect = sect[sect["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
     sect = sect[sect["Minutes"] >= float(min_minutes)]
+    sect = sect[sect["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
     totals = (sect.groupby("complaint_id", as_index=False)["active_ms"].sum())
     totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
     axis = alt.Axis(
@@ -196,6 +199,7 @@ wkdf = fetch_sections_by_weekday()
 if not wkdf.empty:
     if complaint_filter:
         wkdf = wkdf[wkdf["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
+    wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
     def map_bucket(s: str) -> str:
         if not isinstance(s,str): return "PLI Level"
         s=s.strip().lower()

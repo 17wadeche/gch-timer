@@ -181,8 +181,9 @@ st.dataframe(
 def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.DataFrame:
     if ev.empty:
         return pd.DataFrame(columns=[
-            "Start","End","Activity","Active HH:MM:SS","Idle HH:MM:SS",
-            "Active (ms)","Idle (ms)","Session","Page"
+            "Start","Counted End","Last Event","Activity",
+            "Active HH:MM:SS","Idle HH:MM:SS","Ignored HH:MM:SS",
+            "Active (ms)","Idle (ms)","Ignored (ms)","Session","Page"
         ])
     ev = ev.copy()
     ev["section"] = ev["section"].fillna("").replace("", "Unlabeled")
@@ -191,15 +192,19 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
     cur = None
     for _, r in ev.iterrows():
         sec = r["section"]
-        ts  = r["ts"]  # tz-aware (already converted in fetch_events_for_complaint)
+        ts  = r["ts"]  # tz-aware (TZ_NAME)
         if (cur is None) or (sec != cur["Activity"]):
             if cur is not None:
-                dur_ms = int(cur["Active (ms)"] + cur["Idle (ms)"])
-                cur["End"] = cur["Start"] + pd.to_timedelta(dur_ms, unit="ms")
+                counted_ms = cur["Active (ms)"] + cur["Idle (ms)"]
+                counted_end = cur["Start"] + pd.to_timedelta(int(counted_ms), unit="ms")
+                wall_ms = int((cur["Last Event"] - cur["Start"]).total_seconds() * 1000)
+                ignored_ms = max(wall_ms - counted_ms, 0)
+                cur["Counted End"] = counted_end
+                cur["Ignored (ms)"] = ignored_ms
                 blocks.append(cur)
             cur = {
                 "Start": ts,
-                "End": ts,  # provisional; overwritten when closing the block
+                "Last Event": ts,
                 "Activity": sec,
                 "Active (ms)": 0,
                 "Idle (ms)": 0,
@@ -208,19 +213,26 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
             }
         cur["Active (ms)"] += int(r.get("active_ms", 0))
         cur["Idle (ms)"]   += int(r.get("idle_ms", 0))
+        cur["Last Event"]   = ts
     if cur is not None:
-        dur_ms = int(cur["Active (ms)"] + cur["Idle (ms)"])
-        cur["End"] = cur["Start"] + pd.to_timedelta(dur_ms, unit="ms")
+        counted_ms = cur["Active (ms)"] + cur["Idle (ms)"]
+        counted_end = cur["Start"] + pd.to_timedelta(int(counted_ms), unit="ms")
+        wall_ms = int((cur["Last Event"] - cur["Start"]).total_seconds() * 1000)
+        ignored_ms = max(wall_ms - counted_ms, 0)
+        cur["Counted End"] = counted_end
+        cur["Ignored (ms)"] = ignored_ms
         blocks.append(cur)
     out = pd.DataFrame(blocks)
-    out["Active HH:MM:SS"] = out["Active (ms)"].apply(fmt_hms_from_ms)
-    out["Idle HH:MM:SS"]   = out["Idle (ms)"].apply(fmt_hms_from_ms)
-    out["Start"] = pd.to_datetime(out["Start"]).dt.tz_convert(tz_name).dt.tz_localize(None)
-    out["End"]   = pd.to_datetime(out["End"]).dt.tz_convert(tz_name).dt.tz_localize(None)
-    return out[[
-        "Start","End","Activity","Active HH:MM:SS","Idle HH:MM:SS",
-        "Active (ms)","Idle (ms)","Session","Page"
-    ]].sort_values("Start")
+    out["Active HH:MM:SS"]  = out["Active (ms)"].apply(fmt_hms_from_ms)
+    out["Idle HH:MM:SS"]    = out["Idle (ms)"].apply(fmt_hms_from_ms)
+    out["Ignored HH:MM:SS"] = out["Ignored (ms)"].apply(fmt_hms_from_ms)
+    for c in ("Start", "Counted End", "Last Event"):
+        out[c] = pd.to_datetime(out[c]).dt.tz_convert(tz_name).dt.tz_localize(None)
+    return out.sort_values("Start")[
+        ["Start","Counted End","Last Event","Activity",
+         "Active HH:MM:SS","Idle HH:MM:SS","Ignored HH:MM:SS",
+         "Active (ms)","Idle (ms)","Ignored (ms)","Session","Page"]
+    ]
 st.subheader("Complaint row details")
 if df.empty:
     st.info("No data yet.")

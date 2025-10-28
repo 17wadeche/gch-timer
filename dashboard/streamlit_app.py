@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 from datetime import timedelta
+import io
 API_BASE = st.secrets.get("API_BASE", "https://gch-timer-api.onrender.com")
 TIMEOUT = 30
 TZ_NAME = "America/Chicago"
@@ -43,6 +44,38 @@ def fetch_sessions() -> pd.DataFrame:
         if c not in df.columns:
             df[c] = pd.Series(dtype="object")
     return df[schema]
+def build_excel_bytes(sessions_df: pd.DataFrame,
+                      totals_df: pd.DataFrame | None = None,
+                      sections_df: pd.DataFrame | None = None,
+                      weekday_df: pd.DataFrame | None = None) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+        if not sessions_df.empty:
+            (sessions_df.sort_values("Start", ascending=False)
+                        .to_excel(w, index=False, sheet_name="Sessions"))
+        else:
+            pd.DataFrame(columns=["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"])\
+              .to_excel(w, index=False, sheet_name="Sessions")
+        if totals_df is not None and not totals_df.empty:
+            totals_df.rename(columns={"complaint_id":"Complaint",
+                                      "active_ms":"Active (ms)",
+                                      "Total HHMMSS":"Active (HH:MM:SS)"}).to_excel(
+                w, index=False, sheet_name="Totals_by_Complaint"
+            )
+        if sections_df is not None and not sections_df.empty:
+            sections_df.rename(columns={"complaint_id":"Complaint",
+                                        "section":"Activity",
+                                        "active_ms":"Active (ms)",
+                                        "HH:MM:SS":"Active (HH:MM:SS)"}).to_excel(
+                w, index=False, sheet_name="By_Section"
+            )
+        if weekday_df is not None and not weekday_df.empty:
+            weekday_df.rename(columns={"active_ms":"Active (ms)",
+                                       "ACTIVE HH:MM:SS":"Active (HH:MM:SS)"}).to_excel(
+                w, index=False, sheet_name="Weekday_Totals"
+            )
+    buf.seek(0)
+    return buf.read()
 @st.cache_data(ttl=60)
 def fetch_by_section() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sessions_by_section", timeout=TIMEOUT)
@@ -205,8 +238,8 @@ if not wkdf.empty:
         wkdf = wkdf[wkdf["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
     wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
     def map_bucket(s: str) -> str:
-        if not isinstance(s,str): return "PLI Level"
-        s=s.strip().lower()
+        if not isinstance(s, str): return "PLI Level"
+        s = s.strip().lower()
         if s.startswith("reportability"):         return "Reportability"
         if s.startswith("regulatory report"):     return "Regulatory Report"
         if s.startswith("regulatory inquiry"):    return "Regulatory Inquiry"
@@ -234,27 +267,49 @@ if not wkdf.empty:
             continue
         agg = (day_df.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
         agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
-        totals = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
-        totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
-        mean_ms_day = int(totals["active_ms"].mean()) if not totals.empty else 0
+        totals_day = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
+        totals_day["Total HHMMSS"] = totals_day["active_ms"].apply(fmt_hms_from_ms)
+        mean_ms_day = int(totals_day["active_ms"].mean()) if not totals_day.empty else 0
         avg_day_df = pd.DataFrame({"y": [mean_ms_day], "label": [f"Avg {fmt_hms_from_ms(mean_ms_day)}"]})
         avg_day_rule = alt.Chart(avg_day_df).mark_rule(strokeDash=[6,4]).encode(y="y:Q")
         avg_day_text = alt.Chart(avg_day_df).mark_text(align="left", dx=6, dy=-6).encode(y="y:Q", text="label:N")
         stacked = alt.Chart(agg).mark_bar().encode(
-        x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
-        y=alt.Y("sum(active_ms):Q", axis=axis),
-        color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
-        tooltip=[
-            alt.Tooltip("complaint_id:N", title="Complaint"),
-            alt.Tooltip("bucket:N", title="Activity"),
-            alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
-        ]
-    ).properties(height=320, width="container")
-    labels = alt.Chart(totals).mark_text(dy=-6).encode(
-        x="complaint_id:N",
-        y="active_ms:Q",
-        text=alt.Text("Total HHMMSS:N")
-    )
-    st.subheader(f"{day}")
-    st.altair_chart(stacked + labels + avg_day_rule + avg_day_text, use_container_width=True)
+            x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
+            y=alt.Y("sum(active_ms):Q", axis=axis),
+            color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
+            tooltip=[
+                alt.Tooltip("complaint_id:N", title="Complaint"),
+                alt.Tooltip("bucket:N", title="Activity"),
+                alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
+            ]
+        ).properties(height=320, width="container")
+        labels_day = alt.Chart(totals_day).mark_text(dy=-6).encode(
+            x="complaint_id:N",
+            y="active_ms:Q",
+            text=alt.Text("Total HHMMSS:N")
+        )
+        st.subheader(f"{day}")
+        st.altair_chart(stacked + labels_day + avg_day_rule + avg_day_text, use_container_width=True)
+st.subheader("Export")
+sessions_view = display_df[["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
+weekday_totals_df = (
+    df.assign(Weekday=pd.Categorical(df["Weekday"],
+                                     categories=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+                                     ordered=True))
+      .groupby("Weekday", as_index=False)["active_ms"].sum()
+)
+weekday_totals_df["ACTIVE HH:MM:SS"] = weekday_totals_df["active_ms"].apply(fmt_hms_from_ms)
+excel_bytes = build_excel_bytes(
+    sessions_df=sessions_view,
+    totals_df=locals().get("totals", None),
+    sections_df=locals().get("sect", None),
+    weekday_df=weekday_totals_df
+)
+st.download_button(
+    label="⬇️ Export current view (Excel)",
+    data=excel_bytes,
+    file_name="gch_current_view.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    type="primary",
+)
 st.caption("Active time excludes ≥30s idle gaps; 30s–5m are counted as Idle; gaps ≥5m are ignored.")

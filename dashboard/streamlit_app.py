@@ -44,6 +44,10 @@ def fetch_sessions() -> pd.DataFrame:
         if c not in df.columns:
             df[c] = pd.Series(dtype="object")
     return df[schema]
+def _ordinal_word(n: int) -> str:
+    d = {1:"first",2:"second",3:"third"}
+    if n in d: return d[n]
+    return f"{n}th"
 def build_excel_bytes(sessions_df: pd.DataFrame,
                       totals_df: pd.DataFrame | None = None,
                       sections_df: pd.DataFrame | None = None,
@@ -174,10 +178,6 @@ st.dataframe(
     height=420,
     hide_index=True, 
 )
-def _ordinal_word(n: int) -> str:
-    d = {1:"first",2:"second",3:"third"}
-    if n in d: return d[n]
-    return f"{n}th"
 def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.DataFrame:
     if ev.empty:
         return pd.DataFrame(columns=[

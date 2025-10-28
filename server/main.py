@@ -2,7 +2,7 @@ import os, io, smtplib, pytz
 from email.message import EmailMessage
 from datetime import datetime
 from fastapi import FastAPI, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -22,7 +22,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER or "")
-SMTP_TO   = os.getenv("SMTP_TO", "")  # comma-separated list; if empty, will fall back to per-user list from data
+SMTP_TO   = os.getenv("SMTP_TO", "")  # comma-separated; falls back to per-user from data
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
@@ -124,6 +124,24 @@ def events_for_complaint(complaint_id: str = Query(...)):
     with engine.begin() as conn:
         rows = conn.exec_driver_sql(sql, {"cid": complaint_id}).mappings().all()
     return [dict(r) for r in rows]
+@app.get("/sections_by_weekday")
+def sections_by_weekday():
+    with engine.begin() as conn:
+        df = pd.read_sql_query(
+            "SELECT ts, complaint_id, section, active_ms FROM events WHERE TRIM(COALESCE(section,'')) <> ''",
+            conn
+        )
+    if df.empty:
+        return []
+    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
+    df = df.dropna(subset=["ts"])
+    df["weekday"] = df["ts"].dt.day_name()
+    out = (
+        df.groupby(["complaint_id","section","weekday"], as_index=False)["active_ms"]
+          .sum()
+          .sort_values(["weekday","complaint_id","section"])
+    )
+    return out.to_dict(orient="records")
 @app.get("/export.xlsx")
 def export_xlsx():
     with engine.begin() as conn:

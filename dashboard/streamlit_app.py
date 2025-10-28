@@ -52,6 +52,22 @@ def fetch_by_section() -> pd.DataFrame:
     df["Minutes"] = (df["active_ms"]/60000.0)
     df["HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
     return df[["email","ou","complaint_id","section","active_ms","Minutes","HH:MM:SS"]]
+@st.cache_data(ttl=60)
+def fetch_sections_by_weekday() -> pd.DataFrame:
+    r = requests.get(f"{API_BASE}/sections_by_weekday", timeout=TIMEOUT)
+    if r.status_code != 200:
+        return pd.DataFrame(columns=["complaint_id","section","weekday","active_ms"])
+    df = pd.DataFrame(r.json())
+    if df.empty:
+        return df
+    df["active_ms"] = pd.to_numeric(df["active_ms"], errors="coerce").fillna(0).astype(int)
+    df["HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
+    cat = pd.CategoricalDtype(
+        categories=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+        ordered=True
+    )
+    df["weekday"] = df["weekday"].astype(cat)
+    return df
 @st.cache_data(ttl=30)
 def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/events", params={"complaint_id": complaint_id}, timeout=TIMEOUT)
@@ -75,7 +91,7 @@ with st.sidebar:
     complaint_filter = st.text_input("Complaint/Transaction ID contains", "")
     min_minutes = st.number_input("Min ACTIVE minutes", min_value=0.0, value=0.0, step=0.5)
     if st.button("Force refresh data"):
-        fetch_sessions.clear(); fetch_by_section.clear(); fetch_events_for_complaint.clear(); st.experimental_rerun()
+        fetch_sessions.clear(); fetch_by_section.clear(); fetch_events_for_complaint.clear(); fetch_sections_by_weekday.clear(); st.experimental_rerun()
 if ou_choice != "All OUs":
     df = df[df["ou"] == ou_choice]
 if email_filter:
@@ -104,7 +120,7 @@ st.dataframe(
     use_container_width=True,
     height=420,
 )
-st.subheader("Complaint details")
+st.subheader("Complaint row details")
 if df.empty:
     st.info("No data yet.")
 else:
@@ -114,20 +130,29 @@ else:
         sub = df[df["complaint_id"] == cid]
         total_ms = int(sub["active_ms"].sum())
         with st.expander(f"Complaint {cid} — total ACTIVE {fmt_hms_from_ms(total_ms)}"):
-            st.markdown("**Sessions for this complaint**")
+            st.markdown("**Sessions**")
             show = (sub[["Start","email","ou","session_id","Active HH:MM:SS","Idle HH:MM:SS"]]
                     .sort_values("Start", ascending=False)
                     .rename(columns={"email":"Email","ou":"OU","session_id":"Session"}))
-            st.dataframe(show, use_container_width=True, height=220)
+            st.dataframe(show, use_container_width=True, height=200)
             ev = fetch_events_for_complaint(cid)
+            if not ev.empty:
+                totals = (ev.assign(section=ev["section"].fillna("").replace("", "Unlabeled"))
+                            .groupby("section", as_index=False)["active_ms"].sum()
+                            .sort_values("active_ms", ascending=False))
+                st.markdown("**Activities (totals)**")
+                lines = "\n".join(
+                    f"- {row.section} {fmt_hms_from_ms(int(row.active_ms))}"
+                    for _, row in totals.iterrows()
+                )
+                st.markdown(lines)
             if ev.empty:
                 st.caption("No activity events recorded for this complaint.")
             else:
-                st.markdown("**Timeline of activities (ordered)**")
-                timeline = ev[["ts","section","reason","Active HH:MM:SS","Idle HH:MM:SS","Session","page"]].copy()
-                timeline["Session"] = ev["session_id"]
+                st.markdown("**Timeline (ordered)**")
+                timeline = ev[["ts","section","reason","Active HH:MM:SS","Idle HH:MM:SS","session_id","page"]].copy()
                 timeline = timeline.rename(columns={
-                    "ts":"Timestamp", "section":"Activity", "reason":"Reason"
+                    "ts":"Timestamp", "section":"Activity", "reason":"Reason", "session_id":"Session"
                 })
                 st.dataframe(timeline, use_container_width=True, height=260)
 sect = fetch_by_section()
@@ -151,27 +176,90 @@ if not sect.empty:
         if s.startswith("task"):                  return "Task"
         return "PLI Level"
     sect["bucket"] = sect["section"].apply(map_bucket)
+    agg = (sect.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
+    agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
+    totals = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
+    totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
+    axis = alt.Axis(
+        title="Active (HH:MM:SS)",
+        labelExpr=(
+            "floor(datum.value/3600000) + ':' + "
+            "pad(floor((datum.value%3600000)/60000), 2) + ':' + "
+            "pad(floor((datum.value%60000)/1000), 2)"
+        )
+    )
     palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
                       "Product Analysis","Investigation","Communication","Task","PLI Level"]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                       "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
-    stacked = alt.Chart(sect).mark_bar().encode(
+    stacked = alt.Chart(agg).mark_bar().encode(
         x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
-        y=alt.Y("sum(Minutes):Q", title="Active (minutes)"),
+        y=alt.Y("sum(active_ms):Q", axis=axis),
         color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
-        tooltip=[alt.Tooltip("complaint_id:N", title="Complaint"),
-                 alt.Tooltip("bucket:N", title="Activity"),
-                 alt.Tooltip("sum(Minutes):Q", title="Active (min)", format=".1f")]
+        tooltip=[
+            alt.Tooltip("complaint_id:N", title="Complaint"),
+            alt.Tooltip("bucket:N", title="Activity"),
+            alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
+        ]
     ).properties(height=380, width="container")
+    labels = alt.Chart(totals).mark_text(dy=-6).encode(
+        x="complaint_id:N",
+        y="active_ms:Q",
+        text=alt.Text("Total HHMMSS:N", title="Total")
+    )
     st.subheader("Activity level (stacked)")
-    st.altair_chart(stacked, use_container_width=True)
-if not df.empty:
-    st.subheader("Weekday breakdown (ACTIVE)")
-    wk = (df.assign(Weekday=pd.Categorical(df["Weekday"],
-                                           categories=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
-                                           ordered=True))
-            .groupby("Weekday", as_index=False)["active_ms"].sum())
-    wk["ACTIVE HH:MM:SS"] = wk["active_ms"].apply(fmt_hms_from_ms)
-    st.dataframe(wk[["Weekday","ACTIVE HH:MM:SS"]].query("Weekday in ['Monday','Tuesday','Wednesday','Thursday','Friday']"),
-                 use_container_width=True)
+    st.altair_chart(stacked + labels, use_container_width=True)
+wkdf = fetch_sections_by_weekday()
+if not wkdf.empty:
+    if complaint_filter:
+        wkdf = wkdf[wkdf["complaint_id"].astype(str).str.contains(complaint_filter, case=False, na=False)]
+    def map_bucket(s: str) -> str:
+        if not isinstance(s,str): return "PLI Level"
+        s=s.strip().lower()
+        if s.startswith("reportability"):         return "Reportability"
+        if s.startswith("regulatory report"):     return "Regulatory Report"
+        if s.startswith("regulatory inquiry"):    return "Regulatory Inquiry"
+        if s.startswith("product analysis"):      return "Product Analysis"
+        if s.startswith("investigation"):         return "Investigation"
+        if s.startswith("communication"):         return "Communication"
+        if s.startswith("task"):                  return "Task"
+        return "PLI Level"
+    wkdf["bucket"] = wkdf["section"].apply(map_bucket)
+    palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
+                      "Product Analysis","Investigation","Communication","Task","PLI Level"]
+    palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
+                      "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
+    axis = alt.Axis(
+        title="Active (HH:MM:SS)",
+        labelExpr=(
+            "floor(datum.value/3600000) + ':' + "
+            "pad(floor((datum.value%3600000)/60000), 2) + ':' + "
+            "pad(floor((datum.value%60000)/1000), 2)"
+        )
+    )
+    for day in ["Monday","Tuesday","Wednesday","Thursday","Friday"]:
+        day_df = wkdf[wkdf["weekday"] == day]
+        if day_df.empty:
+            continue
+        agg = (day_df.groupby(["complaint_id","bucket"], as_index=False)["active_ms"].sum())
+        agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
+        totals = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
+        totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
+        stacked = alt.Chart(agg).mark_bar().encode(
+            x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
+            y=alt.Y("sum(active_ms):Q", axis=axis),
+            color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
+            tooltip=[
+                alt.Tooltip("complaint_id:N", title="Complaint"),
+                alt.Tooltip("bucket:N", title="Activity"),
+                alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
+            ]
+        ).properties(height=320, width="container")
+        labels = alt.Chart(totals).mark_text(dy=-6).encode(
+            x="complaint_id:N",
+            y="active_ms:Q",
+            text=alt.Text("Total HHMMSS:N")
+        )
+        st.subheader(f"{day}")
+        st.altair_chart(stacked + labels, use_container_width=True)
 st.caption("Active time excludes ≥30s idle gaps; 30s–5m are counted as Idle; gaps ≥5m are ignored.")

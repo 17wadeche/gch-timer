@@ -101,7 +101,7 @@ if not sect.empty:
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                       "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
     stacked = alt.Chart(sect).mark_bar().encode(
-        x=alt.X("complaint_id:N", title="Complaint / Transaction", sort="-y"),
+        x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
         y=alt.Y("sum(Minutes):Q", title="Active Minutes"),
         color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
         tooltip=["complaint_id","bucket","sum(Minutes)"]

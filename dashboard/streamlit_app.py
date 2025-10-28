@@ -47,7 +47,8 @@ def fetch_sessions() -> pd.DataFrame:
 def build_excel_bytes(sessions_df: pd.DataFrame,
                       totals_df: pd.DataFrame | None = None,
                       sections_df: pd.DataFrame | None = None,
-                      weekday_df: pd.DataFrame | None = None) -> bytes:
+                      weekday_df: pd.DataFrame | None = None,
+                      timeline_df: pd.DataFrame | None = None) -> bytes:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
         if not sessions_df.empty:
@@ -57,23 +58,25 @@ def build_excel_bytes(sessions_df: pd.DataFrame,
             pd.DataFrame(columns=["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"])\
               .to_excel(w, index=False, sheet_name="Sessions")
         if totals_df is not None and not totals_df.empty:
-            totals_df.rename(columns={"complaint_id":"Complaint",
-                                      "active_ms":"Active (ms)",
-                                      "Total HHMMSS":"Active (HH:MM:SS)"}).to_excel(
-                w, index=False, sheet_name="Totals_by_Complaint"
-            )
+            totals_df.rename(columns={
+                "complaint_id":"Complaint",
+                "active_ms":"Active (ms)",
+                "Total HHMMSS":"Active (HH:MM:SS)"
+            }).to_excel(w, index=False, sheet_name="Totals_by_Complaint")
         if sections_df is not None and not sections_df.empty:
-            sections_df.rename(columns={"complaint_id":"Complaint",
-                                        "section":"Activity",
-                                        "active_ms":"Active (ms)",
-                                        "HH:MM:SS":"Active (HH:MM:SS)"}).to_excel(
-                w, index=False, sheet_name="By_Section"
-            )
+            sections_df.rename(columns={
+                "complaint_id":"Complaint",
+                "section":"Activity",
+                "active_ms":"Active (ms)",
+                "HH:MM:SS":"Active (HH:MM:SS)"
+            }).to_excel(w, index=False, sheet_name="By_Section")
         if weekday_df is not None and not weekday_df.empty:
-            weekday_df.rename(columns={"active_ms":"Active (ms)",
-                                       "ACTIVE HH:MM:SS":"Active (HH:MM:SS)"}).to_excel(
-                w, index=False, sheet_name="Weekday_Totals"
-            )
+            weekday_df.rename(columns={
+                "active_ms":"Active (ms)",
+                "ACTIVE HH:MM:SS":"Active (HH:MM:SS)"
+            }).to_excel(w, index=False, sheet_name="Weekday_Totals")
+        if timeline_df is not None and not timeline_df.empty:
+            timeline_df.to_excel(w, index=False, sheet_name="Activity_Timeline")
     buf.seek(0)
     return buf.read()
 @st.cache_data(ttl=60)
@@ -163,6 +166,49 @@ st.dataframe(
     height=420,
     hide_index=True, 
 )
+def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.DataFrame:
+    if ev.empty:
+        return pd.DataFrame(columns=[
+            "Start","End","Activity","Active HH:MM:SS","Idle HH:MM:SS",
+            "Active (ms)","Idle (ms)","Session","Page"
+        ])
+    ev = ev.copy()
+    ev["section"] = ev["section"].fillna("").replace("", "Unlabeled")
+    ev = ev.sort_values("ts")
+    blocks = []
+    cur = None
+    last_ts = None
+    for _, r in ev.iterrows():
+        sec = r["section"]
+        ts  = r["ts"]  # already tz-aware (we set this in fetch_events_for_complaint)
+        if (cur is None) or (sec != cur["Activity"]):
+            if cur is not None:
+                cur["End"] = last_ts
+                blocks.append(cur)
+            cur = {
+                "Start": ts,
+                "End": ts,                   # will be updated as we go
+                "Activity": sec,
+                "Active (ms)": 0,
+                "Idle (ms)": 0,
+                "Session": r.get("session_id", ""),
+                "Page": r.get("page", ""),
+            }
+        cur["Active (ms)"] += int(r.get("active_ms", 0))
+        cur["Idle (ms)"]   += int(r.get("idle_ms", 0))
+        last_ts = ts
+    if cur is not None:
+        cur["End"] = last_ts
+        blocks.append(cur)
+    out = pd.DataFrame(blocks)
+    out["Active HH:MM:SS"] = out["Active (ms)"].apply(fmt_hms_from_ms)
+    out["Idle HH:MM:SS"]   = out["Idle (ms)"].apply(fmt_hms_from_ms)
+    out["Start"] = pd.to_datetime(out["Start"]).dt.tz_convert(tz_name).dt.tz_localize(None)
+    out["End"]   = pd.to_datetime(out["End"]).dt.tz_convert(tz_name).dt.tz_localize(None)
+    return out[[
+        "Start","End","Activity","Active HH:MM:SS","Idle HH:MM:SS",
+        "Active (ms)","Idle (ms)","Session","Page"
+    ]].sort_values("Start")
 st.subheader("Complaint row details")
 if df.empty:
     st.info("No data yet.")
@@ -173,17 +219,25 @@ else:
         sub = df[df["complaint_id"] == cid]
         total_ms = int(sub["active_ms"].sum())
         with st.expander(f"Complaint {cid} — total ACTIVE {fmt_hms_from_ms(total_ms)}"):
-            st.markdown("**Sessions**")
-            show = (sub[["Start","email","ou","session_id","Active HH:MM:SS","Idle HH:MM:SS"]]
-                    .sort_values("Start", ascending=False)
-                    .rename(columns={"email":"Email","ou":"OU","session_id":"Session"}))
-            st.dataframe(show, use_container_width=True, height=200)
+            st.markdown("**Timeline (chronological activity blocks)**")
             ev = fetch_events_for_complaint(cid)
-            if not ev.empty:
+            if ev.empty:
+                st.caption("No activity events recorded for this complaint.")
+            else:
+                blocks = collapse_activity_blocks(ev, TZ_NAME)
+                st.dataframe(
+                    blocks.rename(columns={
+                        "Start":"Start (local)",
+                        "End":"End (local)",
+                        "Activity":"Activity"
+                    }),
+                    use_container_width=True,
+                    height=280,
+                )
+                st.markdown("**Activities (totals)**")
                 totals = (ev.assign(section=ev["section"].fillna("").replace("", "Unlabeled"))
                             .groupby("section", as_index=False)["active_ms"].sum()
                             .sort_values("active_ms", ascending=False))
-                st.markdown("**Activities (totals)**")
                 lines = "\n".join(
                     f"- {row.section} {fmt_hms_from_ms(int(row.active_ms))}"
                     for _, row in totals.iterrows()
@@ -309,17 +363,42 @@ else:
 st.subheader("Export")
 sessions_view = display_df[["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
 weekday_totals_df = (
-    df.assign(Weekday=pd.Categorical(df["Weekday"],
-                                     categories=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
-                                     ordered=True))
-      .groupby("Weekday", as_index=False)["active_ms"].sum()
+    df.assign(Weekday=pd.Categorical(
+        df["Weekday"],
+        categories=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"],
+        ordered=True
+    ))
+    .groupby("Weekday", as_index=False)["active_ms"].sum()
 )
 weekday_totals_df["ACTIVE HH:MM:SS"] = weekday_totals_df["active_ms"].apply(fmt_hms_from_ms)
+timeline_rows = []
+visible_complaints = df["complaint_id"].dropna().astype(str).unique().tolist()
+for cid in visible_complaints:
+    ev = fetch_events_for_complaint(cid)
+    if ev.empty:
+        continue
+    blocks = collapse_activity_blocks(ev, TZ_NAME)
+    if not blocks.empty:
+        blocks = blocks.copy()
+        blocks.insert(0, "Complaint", cid)
+        timeline_rows.append(blocks)
+timeline_df = (
+    pd.concat(timeline_rows, ignore_index=True)
+    if timeline_rows else
+    pd.DataFrame(
+        columns=[
+            "Complaint","Start","End","Activity",
+            "Active HH:MM:SS","Idle HH:MM:SS",
+            "Active (ms)","Idle (ms)","Session","Page"
+        ]
+    )
+)
 excel_bytes = build_excel_bytes(
     sessions_df=sessions_view,
-    totals_df=locals().get("totals", None),
-    sections_df=locals().get("sect", None),
-    weekday_df=weekday_totals_df
+    totals_df=locals().get("totals", None),  # totals per complaint (from the bar chart section)
+    sections_df=locals().get("sect", None),  # sessions_by_section (raw)
+    weekday_df=weekday_totals_df,
+    timeline_df=timeline_df,                 # <<< NEW timeline sheet
 )
 st.download_button(
     label="⬇️ Export current view (Excel)",

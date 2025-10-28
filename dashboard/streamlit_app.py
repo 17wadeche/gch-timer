@@ -159,13 +159,25 @@ with c5: st.metric("Sessions", sessions_count)
 with c6: st.metric("Users", users_count)
 st.subheader("Sessions")
 display_df = df.rename(columns={"email": "Email", "ou": "OU", "complaint_id": "Complaint"})
+tmp = display_df.sort_values("Start").copy()
+tmp["__occ_n"] = tmp.groupby("Complaint").cumcount() + 1
+tmp["Occurrence"] = tmp["__occ_n"].apply(
+    lambda n: "" if n == 1 else f"{_ordinal_word(n)} occurrence"
+)
+display_df = tmp.drop(columns=["__occ_n"])
 st.dataframe(
-    display_df[["Start", "Email", "OU", "Complaint", "Active HH:MM:SS", "Idle HH:MM:SS"]]
-        .sort_values("Start", ascending=False),
+    display_df[[
+        "Start", "Email", "OU", "Complaint", "Occurrence",
+        "Active HH:MM:SS", "Idle HH:MM:SS"
+    ]].sort_values("Start", ascending=False),
     use_container_width=True,
     height=420,
     hide_index=True, 
 )
+def _ordinal_word(n: int) -> str:
+    d = {1:"first",2:"second",3:"third"}
+    if n in d: return d[n]
+    return f"{n}th"
 def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.DataFrame:
     if ev.empty:
         return pd.DataFrame(columns=[
@@ -177,17 +189,17 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
     ev = ev.sort_values("ts")
     blocks = []
     cur = None
-    last_ts = None
     for _, r in ev.iterrows():
         sec = r["section"]
-        ts  = r["ts"]  # already tz-aware (we set this in fetch_events_for_complaint)
+        ts  = r["ts"]  # tz-aware (already converted in fetch_events_for_complaint)
         if (cur is None) or (sec != cur["Activity"]):
             if cur is not None:
-                cur["End"] = last_ts
+                dur_ms = int(cur["Active (ms)"] + cur["Idle (ms)"])
+                cur["End"] = cur["Start"] + pd.to_timedelta(dur_ms, unit="ms")
                 blocks.append(cur)
             cur = {
                 "Start": ts,
-                "End": ts,                   # will be updated as we go
+                "End": ts,  # provisional; overwritten when closing the block
                 "Activity": sec,
                 "Active (ms)": 0,
                 "Idle (ms)": 0,
@@ -196,9 +208,9 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
             }
         cur["Active (ms)"] += int(r.get("active_ms", 0))
         cur["Idle (ms)"]   += int(r.get("idle_ms", 0))
-        last_ts = ts
     if cur is not None:
-        cur["End"] = last_ts
+        dur_ms = int(cur["Active (ms)"] + cur["Idle (ms)"])
+        cur["End"] = cur["Start"] + pd.to_timedelta(dur_ms, unit="ms")
         blocks.append(cur)
     out = pd.DataFrame(blocks)
     out["Active HH:MM:SS"] = out["Active (ms)"].apply(fmt_hms_from_ms)
@@ -213,43 +225,59 @@ st.subheader("Complaint row details")
 if df.empty:
     st.info("No data yet.")
 else:
-    order = (df.groupby("complaint_id")["active_ms"].sum()
-               .sort_values(ascending=False).index.tolist())
-    for cid in order:
-        sub = df[df["complaint_id"] == cid]
+    totals_by_c = (
+        df.groupby("complaint_id", as_index=False)["active_ms"]
+          .sum().sort_values("active_ms", ascending=False)
+    )
+    all_cids_sorted = totals_by_c["complaint_id"].astype(str).tolist()
+    search_q = st.text_input("Search complaint ID", "", placeholder="e.g., 6123456")
+    if search_q:
+        filtered = [c for c in all_cids_sorted if search_q.lower() in str(c).lower()]
+    else:
+        filtered = all_cids_sorted
+    selected_cid = st.selectbox(
+        "Select complaint to view",
+        filtered,
+        index=0 if filtered else None,
+        placeholder="Choose a complaint…",
+    )
+    if not filtered:
+        st.info("No complaints match your search.")
+    elif selected_cid:
+        sub = df[df["complaint_id"].astype(str) == str(selected_cid)]
         total_ms = int(sub["active_ms"].sum())
-        with st.expander(f"Complaint {cid} — total ACTIVE {fmt_hms_from_ms(total_ms)}"):
-            st.markdown("**Timeline (chronological activity blocks)**")
-            ev = fetch_events_for_complaint(cid)
-            if ev.empty:
-                st.caption("No activity events recorded for this complaint.")
-            else:
-                blocks = collapse_activity_blocks(ev, TZ_NAME)
-                display_cols = [
-                    "Start (local)", "End (local)", "Activity",
-                    "Active HH:MM:SS", "Idle HH:MM:SS", "Page"
-                ]
-                display_blocks = (
-                    blocks.rename(columns={
-                        "Start": "Start (local)",
-                        "End": "End (local)",
-                    })[display_cols]
-                )
-                st.dataframe(
-                    display_blocks,
-                    use_container_width=True,
-                    height=280,
-                    hide_index=True, 
-                )
-                st.markdown("**Activities (totals)**")
-                totals = (ev.assign(section=ev["section"].fillna("").replace("", "Unlabeled"))
-                            .groupby("section", as_index=False)["active_ms"].sum()
-                            .sort_values("active_ms", ascending=False))
-                lines = "\n".join(
-                    f"- {row.section} {fmt_hms_from_ms(int(row.active_ms))}"
-                    for _, row in totals.iterrows()
-                )
-                st.markdown(lines)
+        st.markdown(f"**Complaint {selected_cid} — total ACTIVE {fmt_hms_from_ms(total_ms)}**")
+        st.markdown("**Timeline (chronological activity blocks)**")
+        ev = fetch_events_for_complaint(str(selected_cid))
+        if ev.empty:
+            st.caption("No activity events recorded for this complaint.")
+        else:
+            blocks = collapse_activity_blocks(ev, TZ_NAME)
+            display_cols = [
+                "Start (local)", "End (local)", "Activity",
+                "Active HH:MM:SS", "Idle HH:MM:SS", "Page"
+            ]
+            display_blocks = (
+                blocks.rename(columns={
+                    "Start": "Start (local)",
+                    "End": "End (local)",
+                })[display_cols]
+            )
+            st.dataframe(
+                display_blocks,
+                use_container_width=True,
+                height=280,
+                hide_index=True, 
+            )
+            st.markdown("**Activities (totals)**")
+            totals = (ev.assign(section=ev["section"].fillna("").replace("", "Unlabeled"))
+                        .groupby("section", as_index=False)["active_ms"].sum()
+                        .sort_values("active_ms", ascending=False))
+            lines = "\n".join(
+                f"- {row.section} {fmt_hms_from_ms(int(row.active_ms))}"
+                for _, row in totals.iterrows()
+            )
+            st.markdown(lines)
 sect = fetch_by_section()
 if not sect.empty:
     if ou_choice != "All OUs":

@@ -127,8 +127,12 @@ with st.sidebar:
     complaint_filter = st.text_input("Complaint/Transaction ID contains", "")
     min_minutes = st.number_input("Min ACTIVE minutes", min_value=0.0, value=0.0, step=0.5)
     if st.button("Force refresh data"):
-        st.cache_data.clear() 
-        st.rerun()         
+        for _fn in (fetch_sessions, fetch_by_section, fetch_events_for_complaint, fetch_sections_by_weekday):
+            try:
+                _fn.clear()
+            except Exception:
+                pass
+        st.rerun()        
 if ou_choice != "All OUs":
     df = df[df["ou"] == ou_choice]
 if email_filter:

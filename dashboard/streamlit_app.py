@@ -228,7 +228,6 @@ else:
                 st.dataframe(
                     blocks.rename(columns={
                         "Start":"Start (local)",
-                        "End":"End (local)",
                         "Activity":"Activity"
                     }),
                     use_container_width=True,

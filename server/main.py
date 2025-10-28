@@ -123,7 +123,7 @@ def events_for_complaint(complaint_id: str):
       ORDER BY ts ASC
     """)
     with engine.begin() as conn:
-        rows = conn.exec_driver_sql(sql, {"cid": complaint_id}).mappings().all()
+        rows = conn.execute(sql, {"cid": complaint_id}).mappings().all()
     return [dict(r) for r in rows]
 @app.get("/sections_by_weekday")
 def sections_by_weekday():
@@ -135,7 +135,7 @@ def sections_by_weekday():
     if df.empty:
         return []
     t = pd.to_datetime(df["ts"], errors="coerce", utc=True)
-    df["weekday"] = t.dt.tz_convert("America/Chicago").day_name()
+    df["weekday"] = t.dt.tz_convert("America/Chicago").dt.day_name()
     out = (
         df.groupby(["complaint_id","section","weekday"], as_index=False)["active_ms"]
           .sum()

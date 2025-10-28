@@ -172,6 +172,10 @@ if not sect.empty:
     sect = sect[sect["complaint_id"].astype(str).str.match(r"^[67]\d+", na=False)]
     totals = (sect.groupby("complaint_id", as_index=False)["active_ms"].sum())
     totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
+    mean_ms = int(totals["active_ms"].mean()) if not totals.empty else 0
+    avg_df = pd.DataFrame({"y": [mean_ms], "label": [f"Avg {fmt_hms_from_ms(mean_ms)}"]})
+    avg_rule = alt.Chart(avg_df).mark_rule(strokeDash=[6,4]).encode(y="y:Q")
+    avg_text = alt.Chart(avg_df).mark_text(align="left", dx=6, dy=-6).encode(y="y:Q", text="label:N")
     axis = alt.Axis(
         title="Active (HH:MM:SS)",
         labelExpr=(
@@ -194,7 +198,7 @@ if not sect.empty:
         text=alt.Text("Total HHMMSS:N")
     )
     st.subheader("Activity level (totals per complaint)")
-    st.altair_chart(bars + labels, use_container_width=True)
+    st.altair_chart(bars + labels + avg_rule + avg_text, use_container_width=True)
 wkdf = fetch_sections_by_weekday()
 if not wkdf.empty:
     if complaint_filter:
@@ -232,21 +236,25 @@ if not wkdf.empty:
         agg["HHMMSS"] = agg["active_ms"].apply(fmt_hms_from_ms)
         totals = (agg.groupby("complaint_id", as_index=False)["active_ms"].sum())
         totals["Total HHMMSS"] = totals["active_ms"].apply(fmt_hms_from_ms)
+        mean_ms_day = int(totals["active_ms"].mean()) if not totals.empty else 0
+        avg_day_df = pd.DataFrame({"y": [mean_ms_day], "label": [f"Avg {fmt_hms_from_ms(mean_ms_day)}"]})
+        avg_day_rule = alt.Chart(avg_day_df).mark_rule(strokeDash=[6,4]).encode(y="y:Q")
+        avg_day_text = alt.Chart(avg_day_df).mark_text(align="left", dx=6, dy=-6).encode(y="y:Q", text="label:N")
         stacked = alt.Chart(agg).mark_bar().encode(
-            x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
-            y=alt.Y("sum(active_ms):Q", axis=axis),
-            color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
-            tooltip=[
-                alt.Tooltip("complaint_id:N", title="Complaint"),
-                alt.Tooltip("bucket:N", title="Activity"),
-                alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
-            ]
-        ).properties(height=320, width="container")
-        labels = alt.Chart(totals).mark_text(dy=-6).encode(
-            x="complaint_id:N",
-            y="active_ms:Q",
-            text=alt.Text("Total HHMMSS:N")
-        )
-        st.subheader(f"{day}")
-        st.altair_chart(stacked + labels, use_container_width=True)
+        x=alt.X("complaint_id:N", title="Complaint", sort="-y"),
+        y=alt.Y("sum(active_ms):Q", axis=axis),
+        color=alt.Color("bucket:N", scale=alt.Scale(domain=palette_domain, range=palette_range), title="Activity"),
+        tooltip=[
+            alt.Tooltip("complaint_id:N", title="Complaint"),
+            alt.Tooltip("bucket:N", title="Activity"),
+            alt.Tooltip("HHMMSS:N", title="Active (HH:MM:SS)")
+        ]
+    ).properties(height=320, width="container")
+    labels = alt.Chart(totals).mark_text(dy=-6).encode(
+        x="complaint_id:N",
+        y="active_ms:Q",
+        text=alt.Text("Total HHMMSS:N")
+    )
+    st.subheader(f"{day}")
+    st.altair_chart(stacked + labels + avg_day_rule + avg_day_text, use_container_width=True)
 st.caption("Active time excludes ≥30s idle gaps; 30s–5m are counted as Idle; gaps ≥5m are ignored.")

@@ -1,13 +1,19 @@
 {
   "manifest_version": 3,
   "name": "GCH Work Timer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Track active time on GCH complaint pages (idle > 5 minutes ignored).",
   "permissions": ["storage"],
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://crm.medtronic.com/*"],
+      "matches": [
+        "https://crm.medtronic.com/*",
+        "https://crmstage.medtronic.com/*",
+        "https://cpic1cs.corp.medtronic.com:8008/*",
+        "https://mspm7aapps0377.cfrf.medtronic.com/testprod/index.html",
+        "https://mspm7aapps0377.cfrf.medtronic.com/intake/index.html"
+      ],
       "all_frames": true,
       "js": ["content.js"],
       "run_at": "document_idle"

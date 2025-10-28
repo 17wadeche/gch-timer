@@ -121,6 +121,7 @@ st.dataframe(
         .sort_values("Start", ascending=False),
     use_container_width=True,
     height=420,
+    hide_index=True, 
 )
 st.subheader("Complaint row details")
 if df.empty:

@@ -144,7 +144,7 @@ with st.sidebar:
     st.subheader("Admin")
     clear_pw = st.text_input("Clear-all password", type="password")
     confirm_clear = st.checkbox("I understand this deletes ALL records")
-    if st.button("🧨 Clear ALL data", disabled=not confirm_clear):
+    if st.button("Clear ALL data", disabled=not confirm_clear):
         try:
             r = requests.post(f"{API_BASE}/clear", json={"password": clear_pw}, timeout=30)
             if r.status_code == 200:

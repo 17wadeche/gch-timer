@@ -1,38 +1,93 @@
-import os, io, smtplib, pytz
-from email.message import EmailMessage
+# server/main.py
+import os
+import io
+import smtplib
+import secrets
 from datetime import datetime
-from fastapi import FastAPI, Query
+from email.message import EmailMessage
+import pytz
+import pandas as pd
+from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import StreamingResponse
-from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
-import pandas as pd
-from apscheduler.schedulers.background import BackgroundScheduler
-import secrets
-from fastapi import HTTPException, status
-from pydantic import BaseModel
-
+DDL = """
+CREATE TABLE IF NOT EXISTS events (
+  ts           TEXT,
+  email        TEXT,
+  team         TEXT,
+  complaint_id TEXT,
+  section      TEXT,
+  reason       TEXT,
+  active_ms    BIGINT,
+  idle_ms      BIGINT DEFAULT 0,
+  page         TEXT,
+  session_id   TEXT
+);
+"""
+def ensure_schema(engine):
+    with engine.begin() as conn:
+        conn.exec_driver_sql(DDL)
+    backend = engine.url.get_backend_name()
+    if backend.startswith("postgresql"):
+        migrations = [
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS team TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS complaint_id TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS section TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS reason TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS active_ms BIGINT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS idle_ms BIGINT DEFAULT 0",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS page TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS session_id TEXT",
+        ]
+        for sql in migrations:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(sql)
+        return
+    with engine.begin() as conn:
+        cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(events)").fetchall()]
+    to_add = []
+    if "team" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN team TEXT")
+    if "complaint_id" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN complaint_id TEXT")
+    if "section" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN section TEXT")
+    if "reason" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN reason TEXT")
+    if "active_ms" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN active_ms BIGINT")
+    if "idle_ms" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN idle_ms BIGINT DEFAULT 0")
+    if "page" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN page TEXT")
+    if "session_id" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN session_id TEXT")
+    for sql in to_add:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(sql)
 DB_URL = os.getenv("DATABASE_URL")
 if DB_URL:
-    if "://" in DB_URL and "+" not in DB_URL.split("://", 1)[0]:
-        DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
+    if DB_URL.startswith("postgres://"):
+        DB_URL = DB_URL.replace("postgres://", "postgresql+psycopg://", 1)
+    elif DB_URL.startswith("postgresql://") and not DB_URL.startswith("postgresql+psycopg://"):
         DB_URL = DB_URL.replace("postgresql://", "postgresql+psycopg://", 1)
     engine = create_engine(DB_URL, pool_pre_ping=True)
 else:
     DB_PATH = os.getenv("DB_PATH", "events.db")
     engine = create_engine(
         f"sqlite:///{DB_PATH}",
-        connect_args={"check_same_thread": False},  # critical for threads (scheduler + requests)
-        poolclass=NullPool,                         # avoids reusing same connection across threads
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
         pool_pre_ping=True,
     )
     with engine.begin() as conn:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL;")
         conn.exec_driver_sql("PRAGMA busy_timeout=5000;")
-        conn.exec_driver_sql(DDL)
+ensure_schema(engine)
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
@@ -48,29 +103,13 @@ app.add_middleware(
         "https://crm.medtronic.com",
         "https://crmstage.medtronic.com",
         "https://cpic1cs.corp.medtronic.com:8008",
-        "https://mspm7aapps0377.cfrf.medtronic.com"
+        "https://mspm7aapps0377.cfrf.medtronic.com",
     ],
     allow_origin_regex=r"https://.*\.medtronic\.com(?::\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
 )
-DDL = """
-CREATE TABLE IF NOT EXISTS events (
-  ts           TEXT,
-  email        TEXT,
-  team           TEXT,
-  complaint_id TEXT,
-  section      TEXT,
-  reason       TEXT,
-  active_ms    BIGINT,
-  idle_ms      BIGINT DEFAULT 0,
-  page         TEXT,
-  session_id   TEXT
-);
-"""
-with engine.begin() as conn:
-    conn.exec_driver_sql(DDL)
 class ClearRequest(BaseModel):
     password: str
 class Event(BaseModel):
@@ -105,11 +144,16 @@ def ingest(ev: Event):
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
-            "ts": ev.ts, "email": ev.email, "team": ev.team or "",
-            "complaint_id": ev.complaint_id or "", "section": ev.section or "",
-            "reason": ev.reason, "active_ms": int(ev.active_ms),
-            "idle_ms": int(ev.idle_ms or 0), "page": ev.page or "",
-            "session_id": ev.session_id
+            "ts": ev.ts,
+            "email": ev.email,
+            "team": (ev.team or "").strip(),
+            "complaint_id": (ev.complaint_id or "").strip(),
+            "section": (ev.section or "").strip(),
+            "reason": ev.reason,
+            "active_ms": int(ev.active_ms),
+            "idle_ms": int(ev.idle_ms or 0),
+            "page": (ev.page or "").strip(),
+            "session_id": ev.session_id,
         })
     return {"ok": True}
 @app.get("/sessions")
@@ -180,7 +224,7 @@ def export_xlsx():
         df.to_excel(w, index=False, sheet_name="events")
         (df.groupby(["email","complaint_id"], as_index=False)[["active_ms","idle_ms"]]
            .sum().to_excel(w, index=False, sheet_name="by_complaint"))
-        (df[df["section"].astype(str)!=""]
+        (df[df["section"].astype(str) != ""]
            .groupby(["complaint_id","section"], as_index=False)["active_ms"].sum()
            .to_excel(w, index=False, sheet_name="by_section"))
     out.seek(0)
@@ -212,7 +256,7 @@ def _export_bytes() -> bytes:
         df.to_excel(w, index=False, sheet_name="events")
         (df.groupby(["email","complaint_id"], as_index=False)[["active_ms","idle_ms"]]
            .sum().to_excel(w, index=False, sheet_name="by_complaint"))
-        (df[df["section"].astype(str)!=""]
+        (df[df["section"].astype(str) != ""]
            .groupby(["complaint_id","section"], as_index=False)["active_ms"].sum()
            .to_excel(w, index=False, sheet_name="by_section"))
     out.seek(0)
@@ -222,13 +266,15 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         raise RuntimeError("SMTP not configured or no recipients.")
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = SMTP_FROM           # From = chey.wade@medtronic.com (default)
-    msg["To"] = ", ".join(recipients) # To   = chey.wade@medtronic.com (default)
+    msg["From"] = SMTP_FROM
+    msg["To"] = ", ".join(recipients)
     msg.set_content("Weekly GCH timer export attached.")
-    msg.add_attachment(xlsx_bytes,
-                       maintype="application",
-                       subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       filename="export.xlsx")
+    msg.add_attachment(
+        xlsx_bytes,
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="export.xlsx",
+    )
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
         s.starttls()
         if SMTP_USER and SMTP_PASS:

@@ -134,7 +134,7 @@
         </div>
         <div class="row">
           <div style="flex:1">
-            <label>Operating Unit</label>
+            <label>Team</label>
             <select id="gch-team">
               <option value="">-- select Team --</option>
               ${ALLOWED_TEAMS.map(o=>`<option value="${o}">${o}</option>`).join("")}

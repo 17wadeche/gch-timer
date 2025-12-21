@@ -6,8 +6,8 @@
   const IDLE_IGNORE_MS  = 5  * 60 * 1000;    // >=5m is ignored entirely
   const HEARTBEAT       = 60 * 1000;
   const EMAIL_KEY = "gch_timer_email";
-  const OU_KEY    = "gch_timer_ou";
-  const ALLOWED_OUS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT"];
+  const TEAM_KEY    = "gch_timer_ou";
+  const ALLOWED_TEAMS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT", "CPT", "DS", "PCS & CDS", "PM", "MCS"]
   const DEBUG=true; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
   function fromGuideSideNav(){ try{
     const el=document.querySelector("a.GUIDE-sideNav"); const t=el?.textContent?.trim()||"";
@@ -27,13 +27,18 @@
   }
   function findComplaintId(){ return fromGuideSideNav()||fromUrl()||fromTitle()||fromText()||""; }
   function findSection(){
+    if (location.host.includes("mspm7aapps0377.cfrf.medtronic.com")) {
+      return "Complaint Wizard";
+    }
     const el=document.querySelector("#bcTitle"); if(!el) return "";
     const raw=(el.getAttribute("title")||el.innerText||"").trim(); if(!raw) return "";
-    const first=raw.split(",")[0]; const nameOnly=first.split(":")[0]; return nameOnly.trim();
+    const first=raw.split(",")[0]; const nameOnly=first.split(":")[0];
+    return nameOnly.trim();
   }
-  let email="", ou="";
+  let email="", team="";
   let complaintId="", section="";
-  let lastActivity=Date.now(), lastTick=Date.now();
+  let lastActivity = 0;
+  let lastTick = Date.now();
   let activeMs=0, idleMs=0, lastSentActiveMs=0, lastSentIdleMs=0;
   const sessionId=Math.random().toString(36).slice(2);
   let started=false;
@@ -43,13 +48,16 @@
   );
   function accrue(){
     const now=Date.now();
-    const dt=now-lastTick;                 // time since last tick
-    const idleGap=now-lastActivity;        // how long we've been idle
-    if(!complaintId){ lastTick=now; return; }
+    const dt=now-lastTick;
+    if(!complaintId || !lastActivity){
+      lastTick = now;
+      return;
+    }
+    const idleGap=now-lastActivity;
     if (idleGap < IDLE_MIN_MS) {
-      activeMs += dt;                      // treat tiny gaps as active
+      activeMs += dt;
     } else if (idleGap < IDLE_IGNORE_MS) {
-      idleMs += dt;                        // log idle 30s–5m
+      idleMs += dt;
     } else {
     }
     lastTick=now;
@@ -61,7 +69,7 @@
     if(!complaintId) return;
     const payload={
       ts:new Date().toISOString(),
-      email, ou,
+      email, team,
       complaint_id:complaintId,
       section,
       reason,
@@ -92,8 +100,10 @@
     }
     if(c && c!==complaintId){ complaintId=c; log("complaint:",c); }
     if(s && s!==section){ section=s; log("section:",s); }
-    if(!started && complaintId && email && ou){
-      lastTick=Date.now(); started=true; send("open");
+    if(!started && complaintId && email && team && lastActivity){
+      lastTick = Date.now();
+      started = true;
+      send("open");
     }
   }
   let panelRoot=null;
@@ -125,9 +135,9 @@
         <div class="row">
           <div style="flex:1">
             <label>Operating Unit</label>
-            <select id="gch-ou">
-              <option value="">-- select OU --</option>
-              ${ALLOWED_OUS.map(o=>`<option value="${o}">${o}</option>`).join("")}
+            <select id="gch-team">
+              <option value="">-- select Team --</option>
+              ${ALLOWED_TEAMS.map(o=>`<option value="${o}">${o}</option>`).join("")}
             </select>
           </div>
           <div style="display:flex;align-items:flex-end"><button id="gch-save">Save</button></div>
@@ -137,20 +147,20 @@
     root.appendChild(style); root.appendChild(wrap);
     const $=sel=>root.querySelector(sel);
     $("#gch-email").value=currEmail||"";
-    $("#gch-ou").value=ALLOWED_OUS.includes(currOu||"")?currOu:"";
+    $("#gch-team").value=ALLOWED_TEAMS.includes(currOu||"")?currOu:"";
     $("#gch-save").addEventListener("click",()=>{
-      const e=$("#gch-email").value.trim(); const o=$("#gch-ou").value.trim();
+      const e=$("#gch-email").value.trim(); const o=$("#gch-team").value.trim();
       if(!e){ alert("Please enter your work email."); return; }
-      if(!ALLOWED_OUS.includes(o)){ alert("Please select a valid OU."); return; }
-      chrome.storage.sync.set({[EMAIL_KEY]:e,[OU_KEY]:o},()=>{
-        email=e; ou=o; host.remove(); panelRoot=null; refreshKeys();
+      if(!ALLOWED_TEAMS.includes(o)){ alert("Please select a valid Team."); return; }
+      chrome.storage.sync.set({[EMAIL_KEY]:e,[TEAM_KEY]:o},()=>{
+        email=e; team=o; host.remove(); panelRoot=null; refreshKeys();
       });
     });
     wrap.querySelector(".x").addEventListener("click",()=>{ host.remove(); panelRoot=null; });
   }
-  chrome.storage.sync.get([EMAIL_KEY,OU_KEY],res=>{
-    email=(res[EMAIL_KEY]||"").trim(); ou=(res[OU_KEY]||"").trim();
-    if(!email || !ALLOWED_OUS.includes(ou)) showSetupPanel(email,ou);
+  chrome.storage.sync.get([EMAIL_KEY,TEAM_KEY],res=>{
+    email=(res[EMAIL_KEY]||"").trim(); team=(res[TEAM_KEY]||"").trim();
+    if(!email || !ALLOWED_TEAMS.includes(team)) showSetupPanel(email,team);
     const mo=new MutationObserver(refreshKeys);
     if(document.body) mo.observe(document.body,{childList:true,subtree:true});
     setInterval(refreshKeys,1500);

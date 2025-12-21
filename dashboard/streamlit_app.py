@@ -24,7 +24,7 @@ def fetch_sessions() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sessions", timeout=TIMEOUT)
     r.raise_for_status()
     df = pd.DataFrame(r.json())
-    schema = ["session_id","email","ou","complaint_id","start_ts","active_ms","idle_ms",
+    schema = ["session_id","email","team","complaint_id","start_ts","active_ms","idle_ms",
               "Active HH:MM:SS","Idle HH:MM:SS","Start","Active Minutes","Idle Minutes","Weekday"]
     if df.empty:
         return pd.DataFrame(columns=schema)
@@ -59,7 +59,7 @@ def build_excel_bytes(sessions_df: pd.DataFrame,
             (sessions_df.sort_values("Start", ascending=False)
                         .to_excel(w, index=False, sheet_name="Sessions"))
         else:
-            pd.DataFrame(columns=["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"])\
+            pd.DataFrame(columns=["Start","Email","Team","Complaint","Active HH:MM:SS","Idle HH:MM:SS"])\
               .to_excel(w, index=False, sheet_name="Sessions")
         if totals_df is not None and not totals_df.empty:
             totals_df.rename(columns={
@@ -87,14 +87,14 @@ def build_excel_bytes(sessions_df: pd.DataFrame,
 def fetch_by_section() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sessions_by_section", timeout=TIMEOUT)
     if r.status_code != 200:
-        return pd.DataFrame(columns=["email","ou","complaint_id","section","active_ms","Minutes"])
+        return pd.DataFrame(columns=["email","team","complaint_id","section","active_ms","Minutes"])
     df = pd.DataFrame(r.json())
     if df.empty:
-        return pd.DataFrame(columns=["email","ou","complaint_id","section","active_ms","Minutes"])
+        return pd.DataFrame(columns=["email","team","complaint_id","section","active_ms","Minutes"])
     df["active_ms"] = pd.to_numeric(df["active_ms"], errors="coerce").fillna(0).astype(int)
     df["Minutes"] = (df["active_ms"]/60000.0)
     df["HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
-    return df[["email","ou","complaint_id","section","active_ms","Minutes","HH:MM:SS"]]
+    return df[["email","team","complaint_id","section","active_ms","Minutes","HH:MM:SS"]]
 @st.cache_data(ttl=60)
 def fetch_sections_by_weekday() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sections_by_weekday", timeout=TIMEOUT)
@@ -115,7 +115,7 @@ def fetch_sections_by_weekday() -> pd.DataFrame:
 def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/events", params={"complaint_id": complaint_id}, timeout=TIMEOUT)
     if r.status_code != 200:
-        return pd.DataFrame(columns=["ts","email","ou","complaint_id","section","reason","active_ms","idle_ms","page","session_id"])
+        return pd.DataFrame(columns=["ts","email","team","complaint_id","section","reason","active_ms","idle_ms","page","session_id"])
     df = pd.DataFrame(r.json())
     if df.empty:
         return df
@@ -126,8 +126,8 @@ def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     df["Idle HH:MM:SS"] = df["idle_ms"].apply(fmt_hms_from_ms)
     return df.sort_values("ts")
 df = fetch_sessions()
-all_ous = ["All OUs"] + sorted(df["ou"].fillna("Unknown").unique().tolist()) if not df.empty else ["All OUs"]
-ou_choice = st.selectbox("Operating Unit (OU)", all_ous, index=0)
+all_ous = ["All Teams"] + sorted(df["team"].fillna("Unknown").unique().tolist()) if not df.empty else ["All Teams"]
+ou_choice = st.selectbox("Team", all_ous, index=0)
 with st.sidebar:
     st.header("Filters")
     email_filter = st.text_input("Email contains", "")
@@ -140,8 +140,27 @@ with st.sidebar:
             except Exception:
                 pass
         st.rerun()        
-if ou_choice != "All OUs":
-    df = df[df["ou"] == ou_choice]
+    st.divider()
+    st.subheader("Admin")
+    clear_pw = st.text_input("Clear-all password", type="password")
+    confirm_clear = st.checkbox("I understand this deletes ALL records")
+    if st.button("🧨 Clear ALL data", disabled=not confirm_clear):
+        try:
+            r = requests.post(f"{API_BASE}/clear", json={"password": clear_pw}, timeout=30)
+            if r.status_code == 200:
+                st.success("All data cleared.")
+                for _fn in (fetch_sessions, fetch_by_section, fetch_events_for_complaint, fetch_sections_by_weekday):
+                    try:
+                        _fn.clear()
+                    except Exception:
+                        pass
+                st.rerun()
+            else:
+                st.error(f"Clear failed: {r.status_code} {r.text}")
+        except Exception as e:
+            st.error(f"Clear failed: {e}")
+if ou_choice != "All Teams":
+    df = df[df["team"] == ou_choice]
 if email_filter:
     df = df[df["email"].astype(str).str.contains(email_filter, case=False, na=False)]
 if complaint_filter:
@@ -162,7 +181,7 @@ with c4: st.metric("Avg IDLE / session",   fmt_hms_from_ms(avg_idle_ms))
 with c5: st.metric("Sessions", sessions_count)
 with c6: st.metric("Users", users_count)
 st.subheader("Sessions")
-display_df = df.rename(columns={"email": "Email", "ou": "OU", "complaint_id": "Complaint"})
+display_df = df.rename(columns={"email": "Email", "team": "Team", "complaint_id": "Complaint"})
 tmp = display_df.sort_values("Start").copy()
 tmp["__occ_n"] = tmp.groupby("Complaint").cumcount() + 1
 tmp["Occurrence"] = tmp["__occ_n"].apply(
@@ -171,7 +190,7 @@ tmp["Occurrence"] = tmp["__occ_n"].apply(
 display_df = tmp.drop(columns=["__occ_n"])
 st.dataframe(
     display_df[[
-        "Start", "Email", "OU", "Complaint", "Occurrence",
+        "Start", "Email", "Team", "Complaint", "Occurrence",
         "Active HH:MM:SS", "Idle HH:MM:SS"
     ]].sort_values("Start", ascending=False),
     use_container_width=True,
@@ -292,8 +311,8 @@ else:
             st.markdown(lines)
 sect = fetch_by_section()
 if not sect.empty:
-    if ou_choice != "All OUs":
-        sect = sect[sect["ou"] == ou_choice]
+    if ou_choice != "All Teams":
+        sect = sect[sect["team"] == ou_choice]
     if email_filter:
         sect = sect[sect["email"].astype(str).str.contains(email_filter, case=False, na=False)]
     if complaint_filter:
@@ -399,7 +418,7 @@ else:
         st.subheader(day)
         st.info(f"No data yet for {day}.")
 st.subheader("Export")
-sessions_view = display_df[["Start","Email","OU","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
+sessions_view = display_df[["Start","Email","Team","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
 weekday_totals_df = (
     df.assign(Weekday=pd.Categorical(
         df["Weekday"],

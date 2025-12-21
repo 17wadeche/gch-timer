@@ -9,6 +9,9 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
+import secrets
+from fastapi import HTTPException, status
+from pydantic import BaseModel
 DB_URL = os.getenv("DATABASE_URL")
 if DB_URL:
     if "://" in DB_URL and "+" not in DB_URL.split("://", 1)[0]:
@@ -24,6 +27,7 @@ SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "chey.wade@medtronic.com")
 SMTP_TO   = os.getenv("SMTP_TO", "chey.wade@medtronic.com")
+ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
 app.add_middleware(
@@ -43,7 +47,7 @@ DDL = """
 CREATE TABLE IF NOT EXISTS events (
   ts           TEXT,
   email        TEXT,
-  ou           TEXT,
+  team           TEXT,
   complaint_id TEXT,
   section      TEXT,
   reason       TEXT,
@@ -55,10 +59,12 @@ CREATE TABLE IF NOT EXISTS events (
 """
 with engine.begin() as conn:
     conn.exec_driver_sql(DDL)
+class ClearRequest(BaseModel):
+    password: str
 class Event(BaseModel):
     ts: str
     email: str
-    ou: str | None = None
+    team: str | None = None
     complaint_id: str | None = None
     section: str | None = None
     reason: str
@@ -73,13 +79,13 @@ def root():
 def ingest(ev: Event):
     sql = text("""
         INSERT INTO events
-          (ts,email,ou,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
+          (ts,email,team,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
         VALUES
-          (:ts,:email,:ou,:complaint_id,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
+          (:ts,:email,:team,:complaint_id,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
-            "ts": ev.ts, "email": ev.email, "ou": ev.ou or "",
+            "ts": ev.ts, "email": ev.email, "team": ev.team or "",
             "complaint_id": ev.complaint_id or "", "section": ev.section or "",
             "reason": ev.reason, "active_ms": int(ev.active_ms),
             "idle_ms": int(ev.idle_ms or 0), "page": ev.page or "",
@@ -90,12 +96,12 @@ def ingest(ev: Event):
 def sessions():
     sql = """
       SELECT
-        session_id, email, ou, complaint_id,
+        session_id, email, team, complaint_id,
         MIN(ts) AS start_ts,
         COALESCE(SUM(active_ms),0) AS active_ms,
         COALESCE(SUM(idle_ms),0)   AS idle_ms
       FROM events
-      GROUP BY session_id, email, ou, complaint_id
+      GROUP BY session_id, email, team, complaint_id
       ORDER BY MAX(ts) DESC
     """
     with engine.begin() as conn:
@@ -104,11 +110,11 @@ def sessions():
 @app.get("/sessions_by_section")
 def sessions_by_section():
     sql = """
-      SELECT email, ou, complaint_id, section,
+      SELECT email, team, complaint_id, section,
              COALESCE(SUM(active_ms),0) AS active_ms
       FROM events
       WHERE TRIM(COALESCE(section,'')) <> ''
-      GROUP BY email, ou, complaint_id, section
+      GROUP BY email, team, complaint_id, section
       ORDER BY MAX(ts) DESC
     """
     with engine.begin() as conn:
@@ -117,7 +123,7 @@ def sessions_by_section():
 @app.get("/events")
 def events_for_complaint(complaint_id: str):
     sql = text("""
-      SELECT ts, email, ou, complaint_id, section, reason, active_ms, idle_ms, page, session_id
+      SELECT ts, email, team, complaint_id, section, reason, active_ms, idle_ms, page, session_id
       FROM events
       WHERE complaint_id = :cid
       ORDER BY ts ASC
@@ -161,7 +167,17 @@ def export_xlsx():
         headers={"Content-Disposition": 'attachment; filename="export.xlsx"'}
     )
 @app.post("/clear")
-def clear_events():
+def clear_events(req: ClearRequest):
+    if not ADMIN_CLEAR_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Clear endpoint is disabled (ADMIN_CLEAR_PASSWORD not set)."
+        )
+    if not secrets.compare_digest((req.password or "").strip(), ADMIN_CLEAR_PASSWORD):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin password."
+        )
     with engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM events")
     return {"ok": True, "cleared": True}

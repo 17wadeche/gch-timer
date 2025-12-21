@@ -1,6 +1,6 @@
 # Privacy Policy — GCH Work Timer
 
-**What we collect.** Work email, Operating Unit (OU), complaint/transaction ID, section name, page URL (Medtronic GCH domains only), timestamps, and aggregated active/idle durations.
+**What we collect.** Work email, Team, complaint/transaction ID, section name, page URL (Medtronic GCH domains only), timestamps, and aggregated active/idle durations.
 
 **How we collect.** A content script runs only on approved Medtronic domains to detect the complaint/section and measure active/idle time (idle >5 minutes ignored).
 
@@ -12,6 +12,6 @@
 
 **Security.** Data is transmitted over HTTPS and protected by access controls. If enabled, API requests include an API key for server-side verification.
 
-**User controls.** Users can remove the extension at any time; stored email/OU can be deleted from the extension’s options page.
+**User controls.** Users can remove the extension at any time; stored email/Team can be deleted from the extension’s options page.
 
 **Contact.** cwade1755@gmail.com

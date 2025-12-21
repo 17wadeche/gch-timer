@@ -72,6 +72,14 @@ class Event(BaseModel):
     idle_ms: int = 0
     page: str | None = None
     session_id: str
+@app.get("/health")
+def health():
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SELECT 1")
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 @app.get("/")
 def root():
     return {"ok": True, "message": "GCH Timer API"}

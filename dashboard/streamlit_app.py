@@ -21,25 +21,38 @@ def to_weekday(dt: pd.Timestamp) -> str:
     return dt.day_name()
 @st.cache_data(ttl=60)
 def fetch_sessions() -> pd.DataFrame:
-    r = requests.get(f"{API_BASE}/sessions", timeout=TIMEOUT)
-    r.raise_for_status()
-    df = pd.DataFrame(r.json())
-    schema = ["session_id","email","team","complaint_id","start_ts","active_ms","idle_ms",
-              "Active HH:MM:SS","Idle HH:MM:SS","Start","Active Minutes","Idle Minutes","Weekday"]
+    schema = [
+        "session_id","email","team","complaint_id","start_ts","active_ms","idle_ms",
+        "Active HH:MM:SS","Idle HH:MM:SS","Start","Active Minutes","Idle Minutes","Weekday"
+    ]
+    try:
+        r = requests.get(f"{API_BASE}/sessions", timeout=TIMEOUT)
+        if r.status_code != 200:
+            st.error(f"/sessions failed: {r.status_code} {r.text}")
+            return pd.DataFrame(columns=schema)
+        data = r.json()
+        df = pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"/sessions request error: {e}")
+        return pd.DataFrame(columns=schema)
     if df.empty:
         return pd.DataFrame(columns=schema)
     for col in ("active_ms", "idle_ms"):
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    for col in ("email", "team", "complaint_id", "session_id"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
+    df["team"] = df["team"].str.strip().replace("", "Unknown")
     start = pd.to_datetime(df.get("start_ts"), errors="coerce", utc=True)
-    df["Start"] = start.dt.tz_convert(TZ_NAME)
-    df["Start"] = df["Start"].dt.tz_localize(None)
+    df["Start"] = start.dt.tz_convert(TZ_NAME).dt.tz_localize(None)
     df["Active Minutes"] = (df["active_ms"] / 60000.0)
-    df["Idle Minutes"] = (df["idle_ms"] / 60000.0)
+    df["Idle Minutes"]   = (df["idle_ms"] / 60000.0)
     df["Active HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
-    df["Idle HH:MM:SS"] = df["idle_ms"].apply(fmt_hms_from_ms)
-    df["Weekday"] = df["Start"].apply(to_weekday)
+    df["Idle HH:MM:SS"]   = df["idle_ms"].apply(fmt_hms_from_ms)
+    df["Weekday"]         = df["Start"].apply(to_weekday)
     for c in schema:
         if c not in df.columns:
             df[c] = pd.Series(dtype="object")
@@ -126,7 +139,8 @@ def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     df["Idle HH:MM:SS"] = df["idle_ms"].apply(fmt_hms_from_ms)
     return df.sort_values("ts")
 df = fetch_sessions()
-all_ous = ["All Teams"] + sorted(df["team"].fillna("Unknown").unique().tolist()) if not df.empty else ["All Teams"]
+teams = df["team"].fillna("").replace("", "Unknown")
+all_ous = ["All Teams"] + sorted(teams.unique().tolist())
 ou_choice = st.selectbox("Team", all_ous, index=0)
 with st.sidebar:
     st.header("Filters")

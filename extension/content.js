@@ -152,14 +152,15 @@
       const e=$("#gch-email").value.trim(); const o=$("#gch-team").value.trim();
       if(!e){ alert("Please enter your work email."); return; }
       if(!ALLOWED_TEAMS.includes(o)){ alert("Please select a valid Team."); return; }
-      chrome.storage.sync.set({[EMAIL_KEY]:e,[TEAM_KEY]:o},()=>{
-        email=e; team=o; host.remove(); panelRoot=null; refreshKeys();
+      chrome.storage.local.set({[EMAIL_KEY]: e, [TEAM_KEY]: o}, () => {
+        email = e; team = o; host.remove(); panelRoot = null; refreshKeys();
       });
     });
     wrap.querySelector(".x").addEventListener("click",()=>{ host.remove(); panelRoot=null; });
   }
-  chrome.storage.sync.get([EMAIL_KEY,TEAM_KEY],res=>{
-    email=(res[EMAIL_KEY]||"").trim(); team=(res[TEAM_KEY]||"").trim();
+  chrome.storage.local.get([EMAIL_KEY, TEAM_KEY], res => {
+    email = (res[EMAIL_KEY] || "").trim();
+    team  = (res[TEAM_KEY] || "").trim();
     if(!email || !ALLOWED_TEAMS.includes(team)) showSetupPanel(email,team);
     const mo=new MutationObserver(refreshKeys);
     if(document.body) mo.observe(document.body,{childList:true,subtree:true});

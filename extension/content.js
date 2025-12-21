@@ -1,3 +1,11 @@
+try {
+  if (window.top !== window) {
+    const ref = (document.referrer || "").toLowerCase();
+    if (ref.includes("mspm7aapps0377.cfrf.medtronic.com")) {
+      return;
+    }
+  }
+} catch (_) {}
 (() => {
   if (window.__gchTimerBooted) return;
   window.__gchTimerBooted = true;

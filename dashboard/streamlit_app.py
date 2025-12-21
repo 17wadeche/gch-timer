@@ -22,18 +22,17 @@ def to_weekday(dt: pd.Timestamp) -> str:
 @st.cache_data(ttl=60)
 def fetch_sessions() -> pd.DataFrame:
     schema = [
-        "session_id","email","team","complaint_id","start_ts","active_ms","idle_ms",
-        "Active HH:MM:SS","Idle HH:MM:SS","Start","Active Minutes","Idle Minutes","Weekday"
+        "session_id", "email", "team", "complaint_id", "start_ts", "active_ms", "idle_ms",
+        "Active HH:MM:SS", "Idle HH:MM:SS", "Start", "Active Minutes", "Idle Minutes", "Weekday"
     ]
     try:
         r = requests.get(f"{API_BASE}/sessions", timeout=TIMEOUT)
         if r.status_code != 200:
             st.error(f"/sessions failed: {r.status_code} {r.text}")
             return pd.DataFrame(columns=schema)
-        data = r.json()
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(r.json())
     except Exception as e:
-        st.error(f"/sessions request error: {e}")
+        st.error(f"/sessions failed: {e}")
         return pd.DataFrame(columns=schema)
     if df.empty:
         return pd.DataFrame(columns=schema)
@@ -48,8 +47,8 @@ def fetch_sessions() -> pd.DataFrame:
     df["team"] = df["team"].str.strip().replace("", "Unknown")
     start = pd.to_datetime(df.get("start_ts"), errors="coerce", utc=True)
     df["Start"] = start.dt.tz_convert(TZ_NAME).dt.tz_localize(None)
-    df["Active Minutes"] = (df["active_ms"] / 60000.0)
-    df["Idle Minutes"]   = (df["idle_ms"] / 60000.0)
+    df["Active Minutes"] = df["active_ms"] / 60000.0
+    df["Idle Minutes"]   = df["idle_ms"] / 60000.0
     df["Active HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
     df["Idle HH:MM:SS"]   = df["idle_ms"].apply(fmt_hms_from_ms)
     df["Weekday"]         = df["Start"].apply(to_weekday)

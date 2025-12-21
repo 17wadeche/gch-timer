@@ -5,13 +5,16 @@ from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 import secrets
 from fastapi import HTTPException, status
 from pydantic import BaseModel
+
 DB_URL = os.getenv("DATABASE_URL")
 if DB_URL:
     if "://" in DB_URL and "+" not in DB_URL.split("://", 1)[0]:
@@ -20,7 +23,16 @@ if DB_URL:
     engine = create_engine(DB_URL, pool_pre_ping=True)
 else:
     DB_PATH = os.getenv("DB_PATH", "events.db")
-    engine = create_engine(f"sqlite:///{DB_PATH}", pool_pre_ping=True)
+    engine = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},  # critical for threads (scheduler + requests)
+        poolclass=NullPool,                         # avoids reusing same connection across threads
+        pool_pre_ping=True,
+    )
+    with engine.begin() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode=WAL;")
+        conn.exec_driver_sql("PRAGMA busy_timeout=5000;")
+        conn.exec_driver_sql(DDL)
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
@@ -112,9 +124,12 @@ def sessions():
       GROUP BY session_id, email, team, complaint_id
       ORDER BY MAX(ts) DESC
     """
-    with engine.begin() as conn:
-        rows = conn.exec_driver_sql(sql).mappings().all()
-    return [dict(r) for r in rows]
+    try:
+        with engine.begin() as conn:
+            rows = conn.exec_driver_sql(sql).mappings().all()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @app.get("/sessions_by_section")
 def sessions_by_section():
     sql = """

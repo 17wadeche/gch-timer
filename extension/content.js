@@ -114,16 +114,30 @@
       send("open");
     }
   }
-  let panelRoot=null;
-  function showSetupPanel(currEmail,currOu){
-    if(panelRoot) return;
-    const host=document.createElement("div");
-    host.style.all="initial"; host.style.position="fixed"; host.style.right="16px"; host.style.bottom="16px"; host.style.zIndex="2147483647";
+  let panelRoot = null;
+  const SETUP_HOST_ID = "gch-timer-setup-host";
+  function showSetupPanel(currEmail, currOu) {
+    try {
+      if (window.top !== window) return;
+    } catch (_) {
+      return;
+    }
+    if (panelRoot) return;
+    if (document.getElementById(SETUP_HOST_ID)) return;
+    const host = document.createElement("div");
+    host.id = SETUP_HOST_ID;
+    host.style.all = "initial";
+    host.style.position = "fixed";
+    host.style.right = "16px";
+    host.style.bottom = "16px";
+    host.style.zIndex = "2147483647";
     document.documentElement.appendChild(host);
-    const root=host.attachShadow({mode:"open"}); panelRoot=host;
-    const style=document.createElement("style"); style.textContent=`
+    const root = host.attachShadow({ mode: "open" });
+    panelRoot = host;
+    const style = document.createElement("style");
+    style.textContent = `
       :host{all:initial}
-      .card{font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#fff;border:1px solid #e3e3e3;border-radius:10px;box-shadow:0 6px 16px rgba(0,0,0,.18);padding:14px;min-width:280px}
+      .card{font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#fff;border:1px solid #e3e3e3;border-radius:10px;box-shadow:0 6px 16px rgba(0,0,0,.18);padding:14px;min-width:280px;position:relative}
       .row{display:flex;gap:8px;margin-top:8px}
       label{display:block;font-weight:600;margin-bottom:4px}
       input,select{width:100%;padding:8px;border:1px solid #ccc;border-radius:8px}
@@ -131,8 +145,8 @@
       .hdr{font-weight:700;margin-bottom:8px}
       .x{position:absolute;top:6px;right:8px;cursor:pointer;font-weight:700}
     `;
-    const wrap=document.createElement("div");
-    wrap.innerHTML=`
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `
       <div class="card">
         <div class="x" title="Close">×</div>
         <div class="hdr">GCH Work Timer – Quick Setup</div>
@@ -145,31 +159,42 @@
             <label>Team</label>
             <select id="gch-team">
               <option value="">-- select Team --</option>
-              ${ALLOWED_TEAMS.map(o=>`<option value="${o}">${o}</option>`).join("")}
+              ${ALLOWED_TEAMS.map(o => `<option value="${o}">${o}</option>`).join("")}
             </select>
           </div>
           <div style="display:flex;align-items:flex-end"><button id="gch-save">Save</button></div>
         </div>
       </div>
     `;
-    root.appendChild(style); root.appendChild(wrap);
-    const $=sel=>root.querySelector(sel);
-    $("#gch-email").value=currEmail||"";
-    $("#gch-team").value=ALLOWED_TEAMS.includes(currOu||"")?currOu:"";
-    $("#gch-save").addEventListener("click",()=>{
-      const e=$("#gch-email").value.trim(); const o=$("#gch-team").value.trim();
-      if(!e){ alert("Please enter your work email."); return; }
-      if(!ALLOWED_TEAMS.includes(o)){ alert("Please select a valid Team."); return; }
-      chrome.storage.local.set({[EMAIL_KEY]: e, [TEAM_KEY]: o}, () => {
-        email = e; team = o; host.remove(); panelRoot = null; refreshKeys();
+    root.appendChild(style);
+    root.appendChild(wrap);
+    const $ = (sel) => root.querySelector(sel);
+    $("#gch-email").value = currEmail || "";
+    $("#gch-team").value = ALLOWED_TEAMS.includes(currOu || "") ? currOu : "";
+    $("#gch-save").addEventListener("click", () => {
+      const e = $("#gch-email").value.trim();
+      const o = $("#gch-team").value.trim();
+      if (!e) { alert("Please enter your work email."); return; }
+      if (!ALLOWED_TEAMS.includes(o)) { alert("Please select a valid Team."); return; }
+      chrome.storage.local.set({ [EMAIL_KEY]: e, [TEAM_KEY]: o }, () => {
+        email = e;
+        team = o;
+        host.remove();
+        panelRoot = null;
+        refreshKeys();
       });
     });
-    wrap.querySelector(".x").addEventListener("click",()=>{ host.remove(); panelRoot=null; });
+    wrap.querySelector(".x").addEventListener("click", () => {
+      host.remove();
+      panelRoot = null;
+    });
   }
   chrome.storage.local.get([EMAIL_KEY, TEAM_KEY], res => {
     email = (res[EMAIL_KEY] || "").trim();
     team  = (res[TEAM_KEY] || "").trim();
-    if(!email || !ALLOWED_TEAMS.includes(team)) showSetupPanel(email,team);
+    if (window.top === window && (!email || !ALLOWED_TEAMS.includes(team))) {
+      showSetupPanel(email, team);
+    }
     const mo=new MutationObserver(refreshKeys);
     if(document.body) mo.observe(document.body,{childList:true,subtree:true});
     setInterval(refreshKeys,1500);

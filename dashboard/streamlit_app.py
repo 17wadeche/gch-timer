@@ -40,6 +40,9 @@ def fetch_sessions() -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    df["total_ms"] = df["active_ms"] + df["idle_ms"]
+    df = df[df["total_ms"] >= 1000].copy()
+    df = df.drop(columns=["total_ms"])
     df = df[~((df["active_ms"] == 0) & (df["idle_ms"] == 0))].copy()
     for col in ("email", "team", "complaint_id", "session_id", "source"):
         if col not in df.columns:

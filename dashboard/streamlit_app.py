@@ -274,7 +274,7 @@ else:
           .sum().sort_values("active_ms", ascending=False)
     )
     all_cids_sorted = totals_by_c["complaint_id"].astype(str).tolist()
-    search_q = st.text_input("Search complaint ID", "", placeholder="e.g., 6123456")
+    search_q = st.text_input("Search complaint ID", "", placeholder="e.g., 608345634")
     if search_q:
         filtered = [c for c in all_cids_sorted if search_q.lower() in str(c).lower()]
     else:

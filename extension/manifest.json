@@ -11,9 +11,8 @@
         "https://crm.medtronic.com/*",
         "https://crmstage.medtronic.com/*",
         "https://cpic1cs.corp.medtronic.com:8008/*",
-        "https://mspm7aapps0377.cfrf.medtronic.com/testprod/index.html",
-        "https://mspm7aapps0377.cfrf.medtronic.com/intake/index.html",
-        "https://mspm7aapps0377.cfrf.medtronic.com/intake/index.html"
+        "https://mspm7aapps0377.cfrf.medtronic.com/*",
+        "https://hcwda30449e.cfrf.medtronic.com/*"
       ],
       "all_frames": true,
       "js": ["content.js"],

@@ -2,7 +2,10 @@
   try {
     if (window.top !== window) {
       const ref = (document.referrer || "").toLowerCase();
-      if (ref.includes("mspm7aapps0377.cfrf.medtronic.com")) {
+      if (
+        ref.includes("mspm7aapps0377.cfrf.medtronic.com") ||
+        ref.includes("hcwda30449e.cfrf.medtronic.com")
+      ) {
         return;
       }
     }
@@ -17,21 +20,39 @@
   const TEAM_KEY    = "gch_timer_ou";
   const ALLOWED_TEAMS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT", "CPT", "DS", "PCS & CDS", "PM", "MCS"]
   const DEBUG=true; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
-  const CW_HOST = "mspm7aapps0377.cfrf.medtronic.com";
+  const CW_HOSTS = new Set([
+    "mspm7aapps0377.cfrf.medtronic.com",
+    "hcwda30449e.cfrf.medtronic.com",
+  ]);
+  const CW_PATH_HINTS = [
+    "/intake/index.html",
+    "/testprod/index.html",
+    "/intakedev/index.html",
+  ];
   function isCW() {
-    return location.host.includes(CW_HOST);
+    return CW_HOSTS.has(location.host) && CW_PATH_HINTS.some(p => location.pathname.includes(p));
   }
   function getSource() {
     return isCW() ? "CW" : "GCH";
   }
   function hasVisibleCWIframeOverlay() {
     if (isCW()) return false;
-    const ifr = document.querySelector(
-      `iframe[src*="${CW_HOST}/intake/index.html"], iframe[src*="${CW_HOST}/testprod/index.html"]`
-    );
-    if (!ifr) return false;
-    const r = ifr.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    const iframes = Array.from(document.querySelectorAll("iframe[src]"));
+    for (const ifr of iframes) {
+      const src = (ifr.getAttribute("src") || "").toLowerCase();
+      if (!src) continue;
+      const isCwHost =
+        src.includes("mspm7aapps0377.cfrf.medtronic.com") ||
+        src.includes("hcwda30449e.cfrf.medtronic.com");
+      const isCwPath =
+        src.includes("/intake/index.html") ||
+        src.includes("/testprod/index.html") ||
+        src.includes("/intakedev/index.html");
+      if (!(isCwHost && isCwPath)) continue;
+      const r = ifr.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return true;
+    }
+    return false;
   }
   function shouldAccrueNow() {
     if (document.visibilityState !== "visible") return false;

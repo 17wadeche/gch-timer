@@ -108,6 +108,7 @@ app.add_middleware(
         "https://crmstage.medtronic.com",
         "https://cpic1cs.corp.medtronic.com:8008",
         "https://mspm7aapps0377.cfrf.medtronic.com",
+        "https://hcwda30449e.cfrf.medtronic.com",
     ],
     allow_origin_regex=r"https://.*\.medtronic\.com(?::\d+)?",
     allow_methods=["*"],

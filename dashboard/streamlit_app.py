@@ -224,7 +224,7 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
     cur = None
     for _, r in ev.iterrows():
         sec = r["section"]
-        ts  = r["ts"]  # tz-aware (TZ_NAME)
+        ts  = r["ts"]
         if (cur is None) or (sec != cur["Activity"]):
             if cur is not None:
                 counted_ms = cur["Active (ms)"] + cur["Idle (ms)"]

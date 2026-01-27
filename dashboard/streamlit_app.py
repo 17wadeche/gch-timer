@@ -203,11 +203,12 @@ display_df = df.rename(columns={
     "source": "Source",
 })
 tmp = display_df.sort_values("Start").copy()
-tmp["__occ_n"] = tmp.groupby(["Complaint", "Source"]).cumcount() + 1
+tmp["__day"] = pd.to_datetime(tmp["Start"], errors="coerce").dt.date
+tmp["__occ_n"] = tmp.groupby(["Email", "Complaint", "__day"]).cumcount() + 1
 tmp["Occurrence"] = tmp["__occ_n"].apply(
     lambda n: "" if n == 1 else f"{_ordinal_word(n)} occurrence"
 )
-display_df = tmp.drop(columns=["__occ_n"])
+display_df = tmp.drop(columns=["__occ_n", "__day"])
 st.dataframe(
     display_df[[
         "Start", "Email", "Team", "Complaint", "Source", "Occurrence",

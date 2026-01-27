@@ -10,8 +10,8 @@
   if (window.__gchTimerBooted) return;
   window.__gchTimerBooted = true;
   const API_URL   = "https://gch-timer-api.onrender.com/ingest";
-  const IDLE_MIN_MS     = 30 * 1000;         // >=30s is "idle"
-  const IDLE_IGNORE_MS  = 5  * 60 * 1000;    // >=5m is ignored entirely
+  const IDLE_MIN_MS     = 30 * 1000;
+  const IDLE_IGNORE_MS  = 5  * 60 * 1000;
   const HEARTBEAT       = 60 * 1000;
   const EMAIL_KEY = "gch_timer_email";
   const TEAM_KEY    = "gch_timer_ou";

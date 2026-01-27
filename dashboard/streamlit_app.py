@@ -190,7 +190,7 @@ with st.sidebar:
                 "clear_after": clear_after,
                 "subject_prefix": "GCH TEST Export",
             }
-            r = requests.post(f"{API_BASE}/send_now", json=payload, timeout=60)
+            r = requests.post(f"{API_BASE}/send_now", json=payload, timeout=180)
             if r.status_code == 200:
                 j = r.json()
                 st.success(f"Email sent to: {', '.join(j.get('sent_to', []))}")

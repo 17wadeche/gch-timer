@@ -101,7 +101,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "chey.wade@medtronic.com")
-SMTP_TO   = os.getenv("SMTP_TO", "chey.wade@medtronic.com")
+SMTP_TO = "chey.wade@medtronic.com"
 ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
@@ -278,7 +278,7 @@ def send_now(req: SendNowRequest):
     if not secrets.compare_digest((req.password or "").strip(), ADMIN_CLEAR_PASSWORD):
         raise HTTPException(status_code=403, detail="Invalid admin password.")
     try:
-        recipients = req.recipients or [e.strip() for e in SMTP_TO.split(",") if e.strip()]
+        recipients = ["chey.wade@medtronic.com"]
         if not recipients:
             raise HTTPException(status_code=400, detail="No recipients configured/provided.")
         xlsx = _export_bytes()

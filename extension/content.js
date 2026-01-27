@@ -41,6 +41,10 @@
   function isCW() {
     return CW_HOSTS.has(location.host) && CW_PATH_HINTS.some(p => location.pathname.includes(p));
   }
+  function isValidComplaintId(v) {
+    const s = String(v || "").trim();
+    return /^[67]\d{5,11}$/.test(s); 
+  }
   function getSource() {
     return isCW() ? "CW" : "GCH";
   }
@@ -96,8 +100,15 @@
     let m=b.match(/\bSR[:#\s-]*([0-9]{6,})\b/i); if(m) return m[1];
     m=b.match(/\bTransaction\s*ID[:#\s-]*([0-9]{6,})\b/i); if(m) return m[1]; return "";
   }
-  function findComplaintId(){
-    return fromCWDom() || fromGuideSideNav() || fromUrl() || fromTitle() || fromText() || "";
+  function findComplaintId() {
+    const id =
+      fromCWDom() ||
+      fromGuideSideNav() ||
+      fromUrl() ||
+      fromTitle() ||
+      fromText() ||
+      "";
+    return isValidComplaintId(id) ? id : "";
   }
   function findSection(){
     if (isCW()) return "Complaint Wizard";
@@ -196,6 +207,11 @@
   }
   function refreshKeys(){
     const c = findComplaintId();
+    if (!c) {
+      const raw =
+        fromCWDom() || fromGuideSideNav() || fromUrl() || fromTitle() || fromText() || "";
+      if (raw) log("rejected complaint id (not 6/7…):", raw);
+    }
     const s = findSection();
     if (c && c !== complaintId) {
       complaintId = c;

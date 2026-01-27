@@ -5,6 +5,7 @@ import smtplib
 import secrets
 from datetime import datetime
 from email.message import EmailMessage
+import re
 import pytz
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -149,11 +150,14 @@ def ingest(ev: Event):
         (:ts,:email,:team,:complaint_id,:source,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
     """)
     with engine.begin() as conn:
+        cid = (ev.complaint_id or "").strip()
+        if cid and not re.match(r"^[67]\d{5,11}$", cid):
+            raise HTTPException(status_code=400, detail="complaint_id must be 6–12 digits starting with 6 or 7")
         conn.execute(sql, {
             "ts": ev.ts,
             "email": ev.email,
             "team": (ev.team or "").strip(),
-            "complaint_id": (ev.complaint_id or "").strip(),
+            "complaint_id": cid,
             "source": (ev.source or "").strip(),
             "section": (ev.section or "").strip(),
             "reason": ev.reason,

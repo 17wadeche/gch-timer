@@ -1,4 +1,4 @@
-# Privacy Policy — GCH Work Timer
+# Privacy Policy — GCH/CW Work Timer
 
 **What we collect.** Work email, Team, complaint/transaction ID, section name, page URL (Medtronic GCH domains only), timestamps, and aggregated active/idle durations.
 

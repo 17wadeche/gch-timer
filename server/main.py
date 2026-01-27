@@ -130,6 +130,11 @@ class Event(BaseModel):
     idle_ms: int = 0
     page: str | None = None
     session_id: str
+class SendNowRequest(BaseModel):
+    password: str
+    recipients: list[str] | None = None
+    clear_after: bool = False
+    subject_prefix: str | None = None
 @app.get("/health")
 def health():
     try:
@@ -260,6 +265,32 @@ def clear_events(req: ClearRequest):
     with engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM events")
     return {"ok": True, "cleared": True}
+@app.post("/send_now")
+def send_now(req: SendNowRequest):
+    if not ADMIN_CLEAR_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Send endpoint is disabled (ADMIN_CLEAR_PASSWORD not set)."
+        )
+    if not secrets.compare_digest((req.password or "").strip(), ADMIN_CLEAR_PASSWORD):
+        raise HTTPException(status_code=403, detail="Invalid admin password.")
+    try:
+        recipients = req.recipients or [e.strip() for e in SMTP_TO.split(",") if e.strip()]
+        if not recipients:
+            raise HTTPException(status_code=400, detail="No recipients configured/provided.")
+        xlsx = _export_bytes()
+        now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+        prefix = (req.subject_prefix or "GCH Export")
+        subject = f"{prefix} – {now}"
+        _send_email(xlsx, subject, recipients)
+        if req.clear_after:
+            with engine.begin() as conn:
+                conn.exec_driver_sql("DELETE FROM events")
+        return {"ok": True, "sent_to": recipients, "cleared": bool(req.clear_after)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 def _export_bytes() -> bytes:
     with engine.begin() as conn:
         df = pd.read_sql_query("SELECT * FROM events", conn)
@@ -304,5 +335,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="sun", hour=23, minute=59)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="fri", hour=17, minute=0)
 scheduler.start()

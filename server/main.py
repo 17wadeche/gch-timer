@@ -177,6 +177,7 @@ def sessions():
         COALESCE(SUM(idle_ms),0)   AS idle_ms
       FROM events
       GROUP BY session_id, email, team, complaint_id, source
+      HAVING (COALESCE(SUM(active_ms),0) + COALESCE(SUM(idle_ms),0)) > 0
       ORDER BY MAX(ts) DESC
     """
     try:

@@ -15,6 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
+import base64
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 DDL = """
 CREATE TABLE IF NOT EXISTS events (
   ts           TEXT,
@@ -305,24 +308,32 @@ def _export_bytes() -> bytes:
     out.seek(0)
     return out.read()
 def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
-    if not (SMTP_HOST and SMTP_FROM and recipients):
-        raise RuntimeError("SMTP not configured or no recipients.")
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = SMTP_FROM
-    msg["To"] = ", ".join(recipients)
-    msg.set_content("Weekly GCH timer export attached.")
-    msg.add_attachment(
-        xlsx_bytes,
-        maintype="application",
-        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename="export.xlsx",
+    api_key = os.getenv("SENDGRID_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("SENDGRID_API_KEY not set.")
+    if not (SMTP_FROM and recipients):
+        raise RuntimeError("From address or recipients missing.")
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+    import base64
+    message = Mail(
+        from_email=SMTP_FROM,
+        to_emails=recipients,
+        subject=subject,
+        html_content="Weekly GCH timer export attached."
     )
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-        s.starttls()
-        if SMTP_USER and SMTP_PASS:
-            s.login(SMTP_USER, SMTP_PASS)
-        s.send_message(msg)
+    encoded = base64.b64encode(xlsx_bytes).decode("utf-8")
+    attachment = Attachment(
+        FileContent(encoded),
+        FileName("export.xlsx"),
+        FileType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        Disposition("attachment"),
+    )
+    message.attachment = attachment
+    sg = SendGridAPIClient(api_key)
+    resp = sg.send(message)
+    if resp.status_code not in (200, 202):
+        raise RuntimeError(f"SendGrid failed: {resp.status_code} {resp.body}")
 def weekly_rollup_job():
     try:
         recipients = [e.strip() for e in SMTP_TO.split(",") if e.strip()]

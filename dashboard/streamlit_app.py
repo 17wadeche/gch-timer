@@ -22,7 +22,7 @@ def to_weekday(dt: pd.Timestamp) -> str:
 @st.cache_data(ttl=60)
 def fetch_sessions() -> pd.DataFrame:
     schema = [
-        "session_id", "email", "team", "complaint_id", "start_ts", "active_ms", "idle_ms",
+        "session_id", "email", "team", "complaint_id", "source", "start_ts", "active_ms", "idle_ms",
         "Active HH:MM:SS", "Idle HH:MM:SS", "Start", "Active Minutes", "Idle Minutes", "Weekday"
     ]
     try:
@@ -40,10 +40,11 @@ def fetch_sessions() -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    for col in ("email", "team", "complaint_id", "session_id"):
+    for col in ("email", "team", "complaint_id", "session_id", "source"):
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].fillna("").astype(str)
+    df["source"] = df["source"].replace("", "GCH")
     df["team"] = df["team"].str.strip().replace("", "Unknown")
     start = pd.to_datetime(df.get("start_ts"), errors="coerce", utc=True)
     df["Start"] = start.dt.tz_convert(TZ_NAME).dt.tz_localize(None)
@@ -127,7 +128,7 @@ def fetch_sections_by_weekday() -> pd.DataFrame:
 def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/events", params={"complaint_id": complaint_id}, timeout=TIMEOUT)
     if r.status_code != 200:
-        return pd.DataFrame(columns=["ts","email","team","complaint_id","section","reason","active_ms","idle_ms","page","session_id"])
+        return pd.DataFrame(columns=["ts","email","team","complaint_id","source","section","reason","active_ms","idle_ms","page","session_id"])
     df = pd.DataFrame(r.json())
     if df.empty:
         return df
@@ -194,21 +195,26 @@ with c4: st.metric("Avg IDLE / session",   fmt_hms_from_ms(avg_idle_ms))
 with c5: st.metric("Sessions", sessions_count)
 with c6: st.metric("Users", users_count)
 st.subheader("Sessions")
-display_df = df.rename(columns={"email": "Email", "team": "Team", "complaint_id": "Complaint"})
+display_df = df.rename(columns={
+    "email": "Email",
+    "team": "Team",
+    "complaint_id": "Complaint",
+    "source": "Source",
+})
 tmp = display_df.sort_values("Start").copy()
-tmp["__occ_n"] = tmp.groupby("Complaint").cumcount() + 1
+tmp["__occ_n"] = tmp.groupby(["Complaint", "Source"]).cumcount() + 1
 tmp["Occurrence"] = tmp["__occ_n"].apply(
     lambda n: "" if n == 1 else f"{_ordinal_word(n)} occurrence"
 )
 display_df = tmp.drop(columns=["__occ_n"])
 st.dataframe(
     display_df[[
-        "Start", "Email", "Team", "Complaint", "Occurrence",
+        "Start", "Email", "Team", "Complaint", "Source", "Occurrence",
         "Active HH:MM:SS", "Idle HH:MM:SS"
     ]].sort_values("Start", ascending=False),
     use_container_width=True,
     height=420,
-    hide_index=True, 
+    hide_index=True,
 )
 def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.DataFrame:
     if ev.empty:
@@ -431,7 +437,7 @@ else:
         st.subheader(day)
         st.info(f"No data yet for {day}.")
 st.subheader("Export")
-sessions_view = display_df[["Start","Email","Team","Complaint","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
+sessions_view = display_df[["Start","Email","Team","Complaint","Source","Active HH:MM:SS","Idle HH:MM:SS"]].copy()
 weekday_totals_df = (
     df.assign(Weekday=pd.Categorical(
         df["Weekday"],
@@ -471,10 +477,10 @@ timeline_df = (
 )
 excel_bytes = build_excel_bytes(
     sessions_df=sessions_view,
-    totals_df=locals().get("totals", None),  # totals per complaint (from the bar chart section)
-    sections_df=locals().get("sect", None),  # sessions_by_section (raw)
+    totals_df=locals().get("totals", None), 
+    sections_df=locals().get("sect", None),
     weekday_df=weekday_totals_df,
-    timeline_df=timeline_df,                 # <<< NEW timeline sheet
+    timeline_df=timeline_df,   
 )
 st.download_button(
     label="⬇️ Export current view (Excel)",

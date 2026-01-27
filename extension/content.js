@@ -17,6 +17,39 @@
   const TEAM_KEY    = "gch_timer_ou";
   const ALLOWED_TEAMS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT", "CPT", "DS", "PCS & CDS", "PM", "MCS"]
   const DEBUG=true; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
+  const CW_HOST = "mspm7aapps0377.cfrf.medtronic.com";
+  function isCW() {
+    return location.host.includes(CW_HOST);
+  }
+  function getSource() {
+    return isCW() ? "CW" : "GCH";
+  }
+  function hasVisibleCWIframeOverlay() {
+    if (isCW()) return false;
+    const ifr = document.querySelector(
+      `iframe[src*="${CW_HOST}/intake/index.html"], iframe[src*="${CW_HOST}/testprod/index.html"]`
+    );
+    if (!ifr) return false;
+    const r = ifr.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function shouldAccrueNow() {
+    if (document.visibilityState !== "visible") return false;
+    if (!document.hasFocus()) return false;
+    if (!isCW() && hasVisibleCWIframeOverlay()) return false;
+    return true;
+  }
+  function fromCWDom() {
+    if (!isCW()) return "";
+    try {
+      const nodes = document.querySelectorAll("b");
+      for (const n of nodes) {
+        const t = (n.textContent || "").trim();
+        if (/^\d{8,12}$/.test(t)) return t;
+      }
+    } catch {}
+    return "";
+  }
   function fromGuideSideNav(){ try{
     const el=document.querySelector("a.GUIDE-sideNav"); const t=el?.textContent?.trim()||"";
     if(/^\d{6,}$/.test(t)) return t;
@@ -33,7 +66,9 @@
     let m=b.match(/\bSR[:#\s-]*([0-9]{6,})\b/i); if(m) return m[1];
     m=b.match(/\bTransaction\s*ID[:#\s-]*([0-9]{6,})\b/i); if(m) return m[1]; return "";
   }
-  function findComplaintId(){ return fromGuideSideNav()||fromUrl()||fromTitle()||fromText()||""; }
+  function findComplaintId(){
+    return fromCWDom() || fromGuideSideNav() || fromUrl() || fromTitle() || fromText() || "";
+  }
   function findSection(){
     if (location.host.includes("mspm7aapps0377.cfrf.medtronic.com")) {
       return "Complaint Wizard";
@@ -55,20 +90,28 @@
     window.addEventListener(ev,onAct,{passive:true})
   );
   function accrue(){
-    const now=Date.now();
-    const dt=now-lastTick;
-    if(!complaintId || !lastActivity){
+    const now = Date.now();
+    const dt = now - lastTick;
+    if (!shouldAccrueNow()) {
       lastTick = now;
       return;
     }
-    const idleGap=now-lastActivity;
+    if(!complaintId){
+      lastTick = now;
+      return;
+    }
+    if(!lastActivity){
+      lastTick = now;
+      return;
+    }
+    const idleGap = now - lastActivity;
     if (idleGap < IDLE_MIN_MS) {
       activeMs += dt;
     } else if (idleGap < IDLE_IGNORE_MS) {
       idleMs += dt;
     } else {
     }
-    lastTick=now;
+    lastTick = now;
   }
   function post(body){
     return fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},body});
@@ -79,6 +122,7 @@
       ts:new Date().toISOString(),
       email, team,
       complaint_id:complaintId,
+      source: getSource(), 
       section,
       reason,
       active_ms:Math.round(activeMs),
@@ -108,7 +152,7 @@
     }
     if(c && c!==complaintId){ complaintId=c; log("complaint:",c); }
     if(s && s!==section){ section=s; log("section:",s); }
-    if(!started && complaintId && email && team && lastActivity){
+    if(!started && complaintId && email && team && (isCW() || lastActivity)){
       lastTick = Date.now();
       started = true;
       send("open");

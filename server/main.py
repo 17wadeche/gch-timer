@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS events (
   email        TEXT,
   team         TEXT,
   complaint_id TEXT,
+  source       TEXT,
   section      TEXT,
   reason       TEXT,
   active_ms    BIGINT,
@@ -42,6 +43,7 @@ def ensure_schema(engine):
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS idle_ms BIGINT DEFAULT 0",
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS page TEXT",
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS session_id TEXT",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS source TEXT",
         ]
         for sql in migrations:
             with engine.begin() as conn:
@@ -66,6 +68,8 @@ def ensure_schema(engine):
         to_add.append("ALTER TABLE events ADD COLUMN page TEXT")
     if "session_id" not in cols:
         to_add.append("ALTER TABLE events ADD COLUMN session_id TEXT")
+    if "source" not in cols:
+        to_add.append("ALTER TABLE events ADD COLUMN source TEXT")
     for sql in to_add:
         with engine.begin() as conn:
             conn.exec_driver_sql(sql)
@@ -117,6 +121,7 @@ class Event(BaseModel):
     email: str
     team: str | None = None
     complaint_id: str | None = None
+    source: str | None = None
     section: str | None = None
     reason: str
     active_ms: int
@@ -138,9 +143,9 @@ def root():
 def ingest(ev: Event):
     sql = text("""
         INSERT INTO events
-          (ts,email,team,complaint_id,section,reason,active_ms,idle_ms,page,session_id)
+        (ts,email,team,complaint_id,source,section,reason,active_ms,idle_ms,page,session_id)
         VALUES
-          (:ts,:email,:team,:complaint_id,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
+        (:ts,:email,:team,:complaint_id,:source,:section,:reason,:active_ms,:idle_ms,:page,:session_id)
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
@@ -160,12 +165,12 @@ def ingest(ev: Event):
 def sessions():
     sql = """
       SELECT
-        session_id, email, team, complaint_id,
+        session_id, email, team, complaint_id, source,
         MIN(ts) AS start_ts,
         COALESCE(SUM(active_ms),0) AS active_ms,
         COALESCE(SUM(idle_ms),0)   AS idle_ms
       FROM events
-      GROUP BY session_id, email, team, complaint_id
+      GROUP BY session_id, email, team, complaint_id, source
       ORDER BY MAX(ts) DESC
     """
     try:
@@ -177,11 +182,11 @@ def sessions():
 @app.get("/sessions_by_section")
 def sessions_by_section():
     sql = """
-      SELECT email, team, complaint_id, section,
-             COALESCE(SUM(active_ms),0) AS active_ms
+      SELECT email, team, complaint_id, source, section,
+        COALESCE(SUM(active_ms),0) AS active_ms
       FROM events
       WHERE TRIM(COALESCE(section,'')) <> ''
-      GROUP BY email, team, complaint_id, section
+      GROUP BY email, team, complaint_id, source, section
       ORDER BY MAX(ts) DESC
     """
     with engine.begin() as conn:
@@ -190,7 +195,7 @@ def sessions_by_section():
 @app.get("/events")
 def events_for_complaint(complaint_id: str):
     sql = text("""
-      SELECT ts, email, team, complaint_id, section, reason, active_ms, idle_ms, page, session_id
+      SELECT ts, email, team, complaint_id, source, section, reason, active_ms, idle_ms, page, session_id
       FROM events
       WHERE complaint_id = :cid
       ORDER BY ts ASC
@@ -202,7 +207,7 @@ def events_for_complaint(complaint_id: str):
 def sections_by_weekday():
     with engine.begin() as conn:
         df = pd.read_sql_query(
-            "SELECT ts, complaint_id, section, active_ms FROM events WHERE TRIM(COALESCE(section,'')) <> ''",
+            "SELECT ts, complaint_id, source, section, active_ms FROM events WHERE TRIM(COALESCE(section,'')) <> ''",
             conn
         )
     if df.empty:
@@ -210,9 +215,9 @@ def sections_by_weekday():
     t = pd.to_datetime(df["ts"], errors="coerce", utc=True)
     df["weekday"] = t.dt.tz_convert("America/Chicago").dt.day_name()
     out = (
-        df.groupby(["complaint_id","section","weekday"], as_index=False)["active_ms"]
+        df.groupby(["complaint_id","source","section","weekday"], as_index=False)["active_ms"]
           .sum()
-          .sort_values(["weekday","complaint_id","section"])
+          .sort_values(["weekday","complaint_id","source","section"])
     )
     return out.to_dict(orient="records")
 @app.get("/export.xlsx")

@@ -12,6 +12,11 @@
   } catch (_) {}
   if (window.__gchTimerBooted) return;
   window.__gchTimerBooted = true;
+    console.log("[GCH-TIMER] boot", {
+    href: location.href,
+    host: location.host,
+    path: location.pathname,
+  });
   const API_URL   = "https://gch-timer-api.onrender.com/ingest";
   const IDLE_MIN_MS     = 30 * 1000;
   const IDLE_IGNORE_MS  = 5  * 60 * 1000;
@@ -19,7 +24,11 @@
   const EMAIL_KEY = "gch_timer_email";
   const TEAM_KEY    = "gch_timer_ou";
   const ALLOWED_TEAMS = ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT", "CPT", "DS", "PCS & CDS", "PM", "MCS"]
-  const DEBUG=true; const log=(...a)=>{ if(DEBUG) console.log("[GCH]",...a); };
+  const DEBUG = true;
+  const log = (...a) => {
+    if (!DEBUG) return;
+    console.log(`[GCH-TIMER][${getSource?.() || "?"}]`, ...a);
+  };
   const CW_HOSTS = new Set([
     "mspm7aapps0377.cfrf.medtronic.com",
     "hcwda30449e.cfrf.medtronic.com",
@@ -91,9 +100,7 @@
     return fromCWDom() || fromGuideSideNav() || fromUrl() || fromTitle() || fromText() || "";
   }
   function findSection(){
-    if (location.host.includes("mspm7aapps0377.cfrf.medtronic.com")) {
-      return "Complaint Wizard";
-    }
+    if (isCW()) return "Complaint Wizard";
     const el=document.querySelector("#bcTitle"); if(!el) return "";
     const raw=(el.getAttribute("title")||el.innerText||"").trim(); if(!raw) return "";
     const first=raw.split(",")[0]; const nameOnly=first.split(":")[0];
@@ -135,28 +142,51 @@
     lastTick = now;
   }
   function post(body){
-    return fetch(API_URL,{method:"POST",headers:{"Content-Type":"application/json"},body});
+    return fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body
+    }).then(async (res) => {
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        log("INGEST FAILED", res.status, txt);
+      } else {
+        log("ingest ok");
+      }
+      return res;
+    }).catch((err) => {
+      log("INGEST ERROR", err);
+      throw err;
+    });
   }
-  function send(reason,sync=false){
-    if(!complaintId) return;
-    const payload={
-      ts:new Date().toISOString(),
-      email, team,
-      complaint_id:complaintId,
-      source: getSource(), 
+  function send(reason, sync = false) {
+    if (!complaintId) return;
+    const payload = {
+      ts: new Date().toISOString(),
+      email,
+      team,
+      complaint_id: complaintId,
+      source: getSource(),
       section,
       reason,
-      active_ms:Math.round(activeMs),
-      idle_ms:Math.round(idleMs),
-      page:location.href,
-      session_id:sessionId
+      active_ms: Math.round(activeMs),
+      idle_ms: Math.round(idleMs),
+      page: location.href,
+      session_id: sessionId
     };
-    const body=JSON.stringify(payload);
-    if(sync && navigator.sendBeacon){
-      navigator.sendBeacon(API_URL,new Blob([body],{type:"application/json"}));
+    log("send", {
+      reason,
+      complaint_id: complaintId,
+      source: getSource(),
+      active_ms: Math.round(activeMs),
+      idle_ms: Math.round(idleMs)
+    });
+    const body = JSON.stringify(payload);
+    if (sync && navigator.sendBeacon) {
+      navigator.sendBeacon(API_URL, new Blob([body], { type: "application/json" }));
       return;
     }
-    post(body).catch(()=> setTimeout(()=>post(body).catch(()=>{}),1000));
+    post(body).catch(() => setTimeout(() => post(body).catch(() => {}), 1000));
   }
   function maybeSend(reason){
     if(!complaintId) return;
@@ -165,17 +195,28 @@
     }
   }
   function refreshKeys(){
-    const c=findComplaintId();
-    const s=findSection();
-    if(started && complaintId && c && c!==complaintId){
-      accrue(); maybeSend("switch");
-      activeMs=0; idleMs=0; lastSentActiveMs=0; lastSentIdleMs=0;
+    const c = findComplaintId();
+    const s = findSection();
+    if (c && c !== complaintId) {
+      complaintId = c;
+      log("complaint detected:", complaintId, "source:", getSource(), "href:", location.href);
     }
-    if(c && c!==complaintId){ complaintId=c; log("complaint:",c); }
-    if(s && s!==section){ section=s; log("section:",s); }
+    if (s && s !== section) {
+      section = s;
+      log("section:", section);
+    }
     if(!started && complaintId && email && team && (isCW() || lastActivity)){
       lastTick = Date.now();
       started = true;
+      log("START session", {
+        complaintId,
+        source: getSource(),
+        email,
+        team,
+        section,
+        startedAt: new Date().toISOString(),
+        lastActivity: !!lastActivity
+      });
       send("open");
     }
   }

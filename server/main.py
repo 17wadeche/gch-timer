@@ -154,6 +154,7 @@ def ingest(ev: Event):
             "email": ev.email,
             "team": (ev.team or "").strip(),
             "complaint_id": (ev.complaint_id or "").strip(),
+            "source": (ev.source or "").strip(),
             "section": (ev.section or "").strip(),
             "reason": ev.reason,
             "active_ms": int(ev.active_ms),

@@ -177,33 +177,33 @@ with st.sidebar:
                 st.error(f"Clear failed: {r.status_code} {r.text}")
         except Exception as e:
             st.error(f"Clear failed: {e}")
-        st.subheader("Email Export")
-        send_pw = st.text_input("Send-email password", type="password", key="send_pw")
-        test_to = st.text_input("Test recipients (comma-separated, optional)", "")
-        clear_after = st.checkbox("Clear data after sending (TEST)", value=False)
-        if st.button("📧 Send test email now"):
-            try:
-                recipients = [x.strip() for x in test_to.split(",") if x.strip()] or None
-                payload = {
-                    "password": send_pw,
-                    "recipients": recipients,
-                    "clear_after": clear_after,
-                    "subject_prefix": "GCH TEST Export",
-                }
-                r = requests.post(f"{API_BASE}/send_now", json=payload, timeout=60)
-                if r.status_code == 200:
-                    j = r.json()
-                    st.success(f"Email sent to: {', '.join(j.get('sent_to', []))}")
-                    if j.get("cleared"):
-                        st.warning("Data was cleared after sending.")
-                        for _fn in (fetch_sessions, fetch_by_section, fetch_events_for_complaint, fetch_sections_by_weekday):
-                            try: _fn.clear()
-                            except Exception: pass
-                        st.rerun()
-                else:
-                    st.error(f"Send failed: {r.status_code} {r.text}")
-            except Exception as e:
-                st.error(f"Send failed: {e}")
+    st.subheader("Email Export")
+    send_pw = st.text_input("Send-email password", type="password", key="send_pw")
+    test_to = st.text_input("Test recipients (comma-separated, optional)", "")
+    clear_after = st.checkbox("Clear data after sending (TEST)", value=False)
+    if st.button("📧 Send test email now"):
+        try:
+            recipients = [x.strip() for x in test_to.split(",") if x.strip()] or None
+            payload = {
+                "password": send_pw,
+                "recipients": recipients,
+                "clear_after": clear_after,
+                "subject_prefix": "GCH TEST Export",
+            }
+            r = requests.post(f"{API_BASE}/send_now", json=payload, timeout=60)
+            if r.status_code == 200:
+                j = r.json()
+                st.success(f"Email sent to: {', '.join(j.get('sent_to', []))}")
+                if j.get("cleared"):
+                    st.warning("Data was cleared after sending.")
+                    for _fn in (fetch_sessions, fetch_by_section, fetch_events_for_complaint, fetch_sections_by_weekday):
+                        try: _fn.clear()
+                        except Exception: pass
+                    st.rerun()
+            else:
+                st.error(f"Send failed: {r.status_code} {r.text}")
+        except Exception as e:
+            st.error(f"Send failed: {e}")
 if ou_choice != "All Teams":
     df = df[df["team"] == ou_choice]
 if email_filter:

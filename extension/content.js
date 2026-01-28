@@ -322,6 +322,5 @@
     setInterval(()=>{ accrue(); refreshKeys(); maybeSend("heartbeat"); },HEARTBEAT);
     document.addEventListener("visibilitychange",()=>{ accrue(); maybeSend("visibility"); });
     window.addEventListener("beforeunload",()=>{ accrue(); sendDelta("unload", true); });
-
   });
 })();

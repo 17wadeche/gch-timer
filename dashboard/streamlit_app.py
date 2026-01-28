@@ -189,10 +189,15 @@ def fetch_by_section() -> pd.DataFrame:
 def fetch_sections_by_weekday() -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/sections_by_weekday", timeout=TIMEOUT)
     if r.status_code != 200:
-        return pd.DataFrame(columns=["complaint_id","section","weekday","active_ms"])
+        return pd.DataFrame(columns=["complaint_id","source","section","weekday","active_ms"])
     df = pd.DataFrame(r.json())
     if df.empty:
         return df
+    for c in ["complaint_id", "source", "section", "weekday", "active_ms"]:
+        if c not in df.columns:
+            df[c] = ""
+    df["source"] = df["source"].fillna("").replace("", "GCH").astype(str)
+    df["section"] = df["section"].fillna("").replace("", "Unlabeled").astype(str)
     df["active_ms"] = pd.to_numeric(df["active_ms"], errors="coerce").fillna(0).astype(int)
     df["HH:MM:SS"] = df["active_ms"].apply(fmt_hms_from_ms)
     cat = pd.CategoricalDtype(
@@ -200,7 +205,7 @@ def fetch_sections_by_weekday() -> pd.DataFrame:
         ordered=True
     )
     df["weekday"] = df["weekday"].astype(cat)
-    return df
+    return df[["complaint_id","source","section","weekday","active_ms","HH:MM:SS"]]
 @st.cache_data(ttl=30)
 def fetch_events_for_complaint(complaint_id: str) -> pd.DataFrame:
     r = requests.get(f"{API_BASE}/events", params={"complaint_id": complaint_id}, timeout=TIMEOUT)
@@ -471,9 +476,11 @@ if not wkdf.empty:
         wkdf = wkdf[wkdf["complaint_id"].astype(str)
                     .str.contains(complaint_filter, case=False, na=False)]
     wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d{5,11}$", na=False)].copy()
-    def map_bucket(s: str) -> str:
-        if not isinstance(s, str): return "PLI Level"
-        s = s.strip().lower()
+    def map_bucket(section: str, source: str) -> str:
+        src = (source or "").strip().upper()
+        if src == "CW":
+            return "CW"
+        s = (section or "").strip().lower()
         if s.startswith("reportability"):      return "Reportability"
         if s.startswith("regulatory report"):  return "Regulatory Report"
         if s.startswith("regulatory inquiry"): return "Regulatory Inquiry"
@@ -482,11 +489,11 @@ if not wkdf.empty:
         if s.startswith("communication"):      return "Communication"
         if s.startswith("task"):               return "Task"
         return "PLI Level"
-    wkdf.loc[:, "bucket"] = wkdf["section"].apply(map_bucket)
+    wkdf.loc[:, "bucket"] = wkdf.apply(lambda r: map_bucket(r["section"], r["source"]), axis=1)
     palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                      "Product Analysis","Investigation","Communication","Task","PLI Level"]
+                  "Product Analysis","Investigation","Communication","Task","PLI Level","CW"]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
-                      "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f"]
+                    "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f","#17becf"]
     axis = alt.Axis(
         title="Active (HH:MM:SS)",
         labelExpr=(

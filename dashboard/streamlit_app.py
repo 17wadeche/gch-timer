@@ -332,7 +332,8 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
     for _, r in ev.iterrows():
         sec = r["section"]
         ts  = r["ts"]
-        if (cur is None) or (sec != cur["Activity"]):
+        page = str(r.get("page", "") or "")
+        if (cur is None) or (sec != cur["Activity"]) or (page != cur["Page"]):
             if cur is not None:
                 _finalize_and_maybe_append(cur)
             cur = {

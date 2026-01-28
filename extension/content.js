@@ -170,8 +170,15 @@
       throw err;
     });
   }
-  function send(reason, sync = false) {
+  function sendDelta(reason, sync = false) {
     if (!complaintId) return;
+    const dActive = Math.max(0, Math.round(activeMs - lastSentActiveMs));
+    const dIdle   = Math.max(0, Math.round(idleMs   - lastSentIdleMs));
+    if (dActive === 0 && dIdle === 0 && !["open", "unload", "visibility", "section_change", "complaint_change"].includes(reason)) {
+      return;
+    }
+    lastSentActiveMs = activeMs;
+    lastSentIdleMs   = idleMs;
     const payload = {
       ts: new Date().toISOString(),
       email,
@@ -180,18 +187,12 @@
       source: getSource(),
       section,
       reason,
-      active_ms: Math.round(activeMs),
-      idle_ms: Math.round(idleMs),
+      active_ms: dActive,
+      idle_ms: dIdle,
       page: location.href,
       session_id: sessionId
     };
-    log("send", {
-      reason,
-      complaint_id: complaintId,
-      source: getSource(),
-      active_ms: Math.round(activeMs),
-      idle_ms: Math.round(idleMs)
-    });
+    log("sendDelta", payload);
     const body = JSON.stringify(payload);
     if (sync && navigator.sendBeacon) {
       navigator.sendBeacon(API_URL, new Blob([body], { type: "application/json" }));
@@ -199,10 +200,10 @@
     }
     post(body).catch(() => setTimeout(() => post(body).catch(() => {}), 1000));
   }
-  function maybeSend(reason){
-    if(!complaintId) return;
-    if(activeMs>lastSentActiveMs || idleMs>lastSentIdleMs){
-      lastSentActiveMs=activeMs; lastSentIdleMs=idleMs; send(reason);
+  function maybeSend(reason) {
+    if (!complaintId) return;
+    if (activeMs > lastSentActiveMs || idleMs > lastSentIdleMs) {
+      sendDelta(reason);
     }
   }
   function refreshKeys(){
@@ -214,10 +215,14 @@
     }
     const s = findSection();
     if (c && c !== complaintId) {
+      accrue();
+      maybeSend("complaint_change"); 
       complaintId = c;
       log("complaint detected:", complaintId, "source:", getSource(), "href:", location.href);
     }
     if (s && s !== section) {
+      accrue();
+      maybeSend("section_change");
       section = s;
       log("section:", section);
     }

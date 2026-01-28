@@ -439,7 +439,7 @@ def weekly_rollup_job():
         recipients = ["chey.wade@medtronic.com"]
         xlsx = _export_bytes()
         now = datetime.now(TZ).strftime("%Y-%m-%d")
-        _send_email(xlsx, f"GCH Weekly Export – {now}", recipients)
+        _send_email(xlsx, f"GCH/CW Weekly Data Export – {now}", recipients)
         with engine.begin() as conn:
             conn.exec_driver_sql("DELETE FROM events")
         print("[weekly] Sent and cleared successfully.")

@@ -239,7 +239,7 @@ with st.sidebar:
         return r.json()
     with st.sidebar:
         st.divider()
-        st.header("Weekly export email list")
+        st.header("Weekly Data Export")
         with st.form("weekly_subscribe", clear_on_submit=True):
             sub_email = st.text_input("Email", placeholder="you@medtronic.com")
             c1, c2 = st.columns(2)
@@ -253,7 +253,7 @@ with st.sidebar:
                 try:
                     if do_sub:
                         api_post("/subscribe", {"email": e})
-                        st.success("Subscribed! You’ll receive the weekly export.")
+                        st.success("Subscribed! You’ll receive the weekly data export.")
                     else:
                         api_post("/unsubscribe", {"email": e})
                         st.success("Unsubscribed.")

@@ -271,7 +271,7 @@
     wrap.innerHTML = `
       <div class="card">
         <div class="x" title="Close">×</div>
-        <div class="hdr">GCH/CW Work Timer – Quick Setup</div>
+        <div class="hdr">GCH/CW Timer – Quick Setup</div>
         <div>
           <label>Email</label>
           <input id="gch-email" type="email" placeholder="you@medtronic.com">

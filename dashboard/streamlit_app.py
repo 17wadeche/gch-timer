@@ -8,8 +8,8 @@ import re
 API_BASE = st.secrets.get("API_BASE", "https://gch-timer-api.onrender.com")
 TIMEOUT = 30
 TZ_NAME = "America/Chicago"
-st.set_page_config(page_title="GCH/CW Work Time", layout="wide")
-st.title("GCH/CW Work Time")
+st.set_page_config(page_title="GCH/CW Timer", layout="wide")
+st.title("GCH/CW Timer")
 def fmt_hms_from_ms(ms: int | float) -> str:
     ms = 0 if pd.isna(ms) else int(ms)
     s = max(ms, 0) // 1000

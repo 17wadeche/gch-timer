@@ -481,6 +481,8 @@ if not wkdf.empty:
         if src == "CW":
             return "CW"
         s = (section or "").strip().lower()
+        if s in {"e-mail", "email", "e mail"} or s.startswith("e-mail") or s.startswith("email"):
+            return "Communication"
         if s.startswith("reportability"):      return "Reportability"
         if s.startswith("regulatory report"):  return "Regulatory Report"
         if s.startswith("regulatory inquiry"): return "Regulatory Inquiry"

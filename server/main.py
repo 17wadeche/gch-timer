@@ -20,6 +20,17 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 from pathlib import Path
 import tempfile
+from fastapi import Query
+SUBSCRIBERS_TOKEN = os.getenv("SUBSCRIBERS_TOKEN", "1234")
+def _active_subscriber_emails() -> list[str]:
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT email
+            FROM subscribers
+            WHERE is_active = 1
+            ORDER BY created_ts DESC
+        """)).fetchall()
+    return [r[0] for r in rows]
 DDL = """
 CREATE TABLE IF NOT EXISTS events (
   ts           TEXT,
@@ -291,6 +302,11 @@ def sessions_by_section():
     with engine.begin() as conn:
         rows = conn.exec_driver_sql(sql).mappings().all()
     return [dict(r) for r in rows]
+@app.get("/active_subscribers")
+def active_subscribers(token: str = Query(default="")):
+    if not SUBSCRIBERS_TOKEN or not secrets.compare_digest(token, SUBSCRIBERS_TOKEN):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return _active_subscriber_emails()
 @app.get("/events")
 def events_for_complaint(complaint_id: str):
     sql = text("""

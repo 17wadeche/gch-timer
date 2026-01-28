@@ -62,6 +62,16 @@ def fetch_sessions() -> pd.DataFrame:
         if c not in df.columns:
             df[c] = pd.Series(dtype="object")
     return df[schema]
+@st.cache_data(ttl=300)
+def fetch_active_subscribers() -> list[str]:
+    token = st.secrets["SUBSCRIBERS_TOKEN"]
+    r = requests.get(f"{API_BASE}/active_subscribers", params={"token": token}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+with st.sidebar:
+    st.subheader("Active weekly subscribers")
+    emails = fetch_active_subscribers()
+    st.write("\n".join(f"- {e}" for e in emails) if emails else "None yet.")
 def _ordinal_word(n: int) -> str:
     d = {1:"first",2:"second",3:"third"}
     if n in d: return d[n]

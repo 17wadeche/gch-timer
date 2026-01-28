@@ -320,18 +320,21 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
     ev = ev.sort_values("ts")
     blocks = []
     cur = None
+    def _finalize_and_maybe_append(cur_dict: dict):
+        counted_ms = cur_dict["Active (ms)"] + cur_dict["Idle (ms)"]
+        counted_end = cur_dict["Start"] + pd.to_timedelta(int(counted_ms), unit="ms")
+        wall_ms = int((cur_dict["Last Event"] - cur_dict["Start"]).total_seconds() * 1000)
+        ignored_ms = max(wall_ms - counted_ms, 0)
+        cur_dict["Counted End"] = counted_end
+        cur_dict["Ignored (ms)"] = ignored_ms
+        if not (cur_dict["Active (ms)"] < 1000 and cur_dict["Idle (ms)"] < 1000):
+            blocks.append(cur_dict)
     for _, r in ev.iterrows():
         sec = r["section"]
         ts  = r["ts"]
         if (cur is None) or (sec != cur["Activity"]):
             if cur is not None:
-                counted_ms = cur["Active (ms)"] + cur["Idle (ms)"]
-                counted_end = cur["Start"] + pd.to_timedelta(int(counted_ms), unit="ms")
-                wall_ms = int((cur["Last Event"] - cur["Start"]).total_seconds() * 1000)
-                ignored_ms = max(wall_ms - counted_ms, 0)
-                cur["Counted End"] = counted_end
-                cur["Ignored (ms)"] = ignored_ms
-                blocks.append(cur)
+                _finalize_and_maybe_append(cur)
             cur = {
                 "Start": ts,
                 "Last Event": ts,
@@ -345,14 +348,14 @@ def collapse_activity_blocks(ev: pd.DataFrame, tz_name: str = TZ_NAME) -> pd.Dat
         cur["Idle (ms)"]   += int(r.get("idle_ms", 0))
         cur["Last Event"]   = ts
     if cur is not None:
-        counted_ms = cur["Active (ms)"] + cur["Idle (ms)"]
-        counted_end = cur["Start"] + pd.to_timedelta(int(counted_ms), unit="ms")
-        wall_ms = int((cur["Last Event"] - cur["Start"]).total_seconds() * 1000)
-        ignored_ms = max(wall_ms - counted_ms, 0)
-        cur["Counted End"] = counted_end
-        cur["Ignored (ms)"] = ignored_ms
-        blocks.append(cur)
+        _finalize_and_maybe_append(cur)
     out = pd.DataFrame(blocks)
+    if out.empty:
+        return pd.DataFrame(columns=[
+            "Start","Counted End","Last Event","Activity",
+            "Active HH:MM:SS","Idle HH:MM:SS","Ignored HH:MM:SS",
+            "Active (ms)","Idle (ms)","Ignored (ms)","Session","Page"
+        ])
     out["Active HH:MM:SS"]  = out["Active (ms)"].apply(fmt_hms_from_ms)
     out["Idle HH:MM:SS"]    = out["Idle (ms)"].apply(fmt_hms_from_ms)
     out["Ignored HH:MM:SS"] = out["Ignored (ms)"].apply(fmt_hms_from_ms)

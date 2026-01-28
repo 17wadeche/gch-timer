@@ -18,6 +18,8 @@ from sqlalchemy.pool import NullPool
 import base64
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+from pathlib import Path
+import tempfile
 DDL = """
 CREATE TABLE IF NOT EXISTS events (
   ts           TEXT,
@@ -33,9 +35,36 @@ CREATE TABLE IF NOT EXISTS events (
   session_id   TEXT
 );
 """
+DDL_SUBSCRIBERS = """
+CREATE TABLE IF NOT EXISTS subscribers (
+  email      TEXT PRIMARY KEY,
+  team       TEXT,
+  is_active  INTEGER DEFAULT 1,
+  created_ts TEXT
+);
+"""
+SUBSCRIBERS_CSV_PATH = os.getenv(
+    "SUBSCRIBERS_CSV_PATH",
+    str(Path(__file__).with_name("subscribers.csv")) 
+)
+def _get_subscribers_df() -> pd.DataFrame:
+    with engine.begin() as conn:
+        return pd.read_sql_query(
+            "SELECT email, team, is_active, created_ts FROM subscribers ORDER BY created_ts DESC",
+            conn
+        )
+def _write_subscribers_csv() -> None:
+    p = Path(SUBSCRIBERS_CSV_PATH)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    df = _get_subscribers_df()
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=str(p.parent), newline="", encoding="utf-8") as tmp:
+        df.to_csv(tmp.name, index=False)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(p)
 def ensure_schema(engine):
     with engine.begin() as conn:
         conn.exec_driver_sql(DDL)
+        conn.exec_driver_sql(DDL_SUBSCRIBERS)
     backend = engine.url.get_backend_name()
     if backend.startswith("postgresql"):
         migrations = [
@@ -96,6 +125,10 @@ else:
         conn.exec_driver_sql("PRAGMA journal_mode=WAL;")
         conn.exec_driver_sql("PRAGMA busy_timeout=5000;")
 ensure_schema(engine)
+try:
+    _write_subscribers_csv()
+except Exception as e:
+    print(f"[subscribers.csv] initial write failed: {e}")
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
@@ -138,6 +171,57 @@ class SendNowRequest(BaseModel):
     recipients: list[str] | None = None
     clear_after: bool = False
     subject_prefix: str | None = None
+class SubscribeRequest(BaseModel):
+    email: str
+    team: str | None = None
+
+class UnsubscribeRequest(BaseModel):
+    email: str
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+def _norm_email(e: str) -> str:
+    return (e or "").strip().lower()
+def _validate_email(e: str) -> str:
+    e = _norm_email(e)
+    if not EMAIL_RE.match(e):
+        raise HTTPException(status_code=400, detail="Invalid email address.")
+    if not e.endswith("@medtronic.com"):
+        raise HTTPException(status_code=400, detail="Use your @medtronic.com email.")
+    return e
+@app.post("/subscribe")
+def subscribe(req: SubscribeRequest):
+    email = _validate_email(req.email)
+    team = (req.team or "").strip()
+    now = datetime.now(TZ).isoformat()
+    sql = text("""
+        INSERT INTO subscribers (email, team, is_active, created_ts)
+        VALUES (:email, :team, 1, :created_ts)
+        ON CONFLICT(email) DO UPDATE SET
+            team = excluded.team,
+            is_active = 1
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, {"email": email, "team": team, "created_ts": now})
+    _write_subscribers_csv() 
+    return {"ok": True, "email": email, "team": team, "is_active": True}
+@app.post("/unsubscribe")
+def unsubscribe(req: UnsubscribeRequest):
+    email = _validate_email(req.email)
+    sql = text("UPDATE subscribers SET is_active = 0 WHERE email = :email")
+    with engine.begin() as conn:
+        conn.execute(sql, {"email": email})
+    _write_subscribers_csv()  
+    return {"ok": True, "email": email, "is_active": False}
+@app.get("/subscribers")
+def list_subscribers(password: str):
+    if not secrets.compare_digest((password or "").strip(), ADMIN_CLEAR_PASSWORD):
+        raise HTTPException(status_code=403, detail="Invalid admin password.")
+    with engine.begin() as conn:
+        rows = conn.execute(text("""
+            SELECT email, team, is_active, created_ts
+            FROM subscribers
+            ORDER BY created_ts DESC
+        """)).mappings().all()
+    return [dict(r) for r in rows]
 @app.get("/health")
 def health():
     try:
@@ -336,7 +420,7 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         raise RuntimeError(f"SendGrid failed: {resp.status_code} {resp.body}")
 def weekly_rollup_job():
     try:
-        recipients = [e.strip() for e in SMTP_TO.split(",") if e.strip()]
+        recipients = ["chey.wade@medtronic.com"]
         xlsx = _export_bytes()
         now = datetime.now(TZ).strftime("%Y-%m-%d")
         _send_email(xlsx, f"GCH Weekly Export – {now}", recipients)

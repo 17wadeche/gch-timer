@@ -4,6 +4,7 @@ import streamlit as st
 import altair as alt
 from datetime import timedelta
 import io
+import re
 API_BASE = st.secrets.get("API_BASE", "https://gch-timer-api.onrender.com")
 TIMEOUT = 30
 TZ_NAME = "America/Chicago"
@@ -159,6 +160,35 @@ with st.sidebar:
                 pass
         st.rerun()        
     st.divider()
+    EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    def api_post(path: str, payload: dict):
+        r = requests.post(f"{API_BASE}{path}", json=payload, timeout=TIMEOUT)
+        if r.status_code != 200:
+            raise RuntimeError(f"{path} failed: {r.status_code} {r.text}")
+        return r.json()
+    with st.sidebar:
+        st.divider()
+        st.header("Weekly export email list")
+        with st.form("weekly_subscribe", clear_on_submit=True):
+            sub_email = st.text_input("Email", placeholder="you@medtronic.com")
+            sub_team = st.selectbox("Team (optional)", [""] + ["Aortic","CAS","CRDN","ECT","PVH","SVT","TCT","CPT","DS","PCS & CDS","PM","MCS"])
+            c1, c2 = st.columns(2)
+            do_sub = c1.form_submit_button("Subscribe ✅", use_container_width=True)
+            do_unsub = c2.form_submit_button("Unsubscribe 🛑", use_container_width=True)
+        if do_sub or do_unsub:
+            e = (sub_email or "").strip().lower()
+            if not EMAIL_RE.match(e):
+                st.error("Enter a valid email.")
+            else:
+                try:
+                    if do_sub:
+                        api_post("/subscribe", {"email": e, "team": sub_team or None})
+                        st.success("Subscribed! You’ll receive the weekly export.")
+                    else:
+                        api_post("/unsubscribe", {"email": e})
+                        st.success("Unsubscribed.")
+                except Exception as ex:
+                    st.error(str(ex))
 if ou_choice != "All Teams":
     df = df[df["team"] == ou_choice]
 if email_filter:

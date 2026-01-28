@@ -478,8 +478,8 @@ if not wkdf.empty:
     wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d{5,11}$", na=False)].copy()
     def map_bucket(section: str, source: str) -> str:
         src = (source or "").strip().upper()
-        if src == "CW":
-            return "CW"
+        if src == "Complaint Wizard":
+            return "Complaint Wizard"
         s = (section or "").strip().lower()
         if s.startswith("reportability"):      return "Reportability"
         if s.startswith("regulatory report"):  return "Regulatory Report"

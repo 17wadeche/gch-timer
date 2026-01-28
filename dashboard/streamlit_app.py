@@ -86,17 +86,17 @@ def _emails_to_csv_bytes(emails: list[str]) -> bytes:
     return buf.getvalue().encode("utf-8")
 def _get_query_param(name: str) -> str:
     try:
-        v = st.query_params.get(name)  # newer Streamlit
+        v = st.query_params.get(name) 
         if isinstance(v, list):
             return v[0] if v else ""
         return v or ""
     except Exception:
-        qp = st.experimental_get_query_params()  # older Streamlit
+        qp = st.experimental_get_query_params() 
         v = qp.get(name, [""])
         return v[0] if v else ""
 with st.sidebar:
     admin_key_expected = st.secrets.get("SUBSCRIBERS_ADMIN_KEY", "")
-    admin_key_given = _get_query_param("_k")  # you will use ?_k=....
+    admin_key_given = _get_query_param("_k") 
     admin_gate_ok = bool(admin_key_expected) and secrets.compare_digest(
         admin_key_given or "", admin_key_expected
     )

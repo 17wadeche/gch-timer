@@ -76,41 +76,64 @@ def _emails_to_csv_bytes(emails: list[str]) -> bytes:
     for e in emails:
         buf.write(f"{e}\n")
     return buf.getvalue().encode("utf-8")
+import secrets
+import io
+def _emails_to_csv_bytes(emails: list[str]) -> bytes:
+    buf = io.StringIO()
+    buf.write("email\n")
+    for e in emails:
+        buf.write(f"{e}\n")
+    return buf.getvalue().encode("utf-8")
+def _get_query_param(name: str) -> str:
+    try:
+        v = st.query_params.get(name)  # newer Streamlit
+        if isinstance(v, list):
+            return v[0] if v else ""
+        return v or ""
+    except Exception:
+        qp = st.experimental_get_query_params()  # older Streamlit
+        v = qp.get(name, [""])
+        return v[0] if v else ""
 with st.sidebar:
-    st.subheader("Active weekly subscribers")
-    if "subs_admin_ok" not in st.session_state:
-        st.session_state["subs_admin_ok"] = False
-    admin_pw = st.text_input("Admin password", type="password", placeholder="••••••••")
-    col_a, col_b = st.columns(2)
-    if col_a.button("Unlock", use_container_width=True):
-        expected = st.secrets.get("ADMIN_SUBSCRIBERS_PASSWORD", "")
-        if expected and secrets.compare_digest(admin_pw or "", expected):
-            st.session_state["subs_admin_ok"] = True
-            st.success("Unlocked.")
-            st.rerun()
-        else:
+    admin_key_expected = st.secrets.get("SUBSCRIBERS_ADMIN_KEY", "")
+    admin_key_given = _get_query_param("_k")  # you will use ?_k=....
+    admin_gate_ok = bool(admin_key_expected) and secrets.compare_digest(
+        admin_key_given or "", admin_key_expected
+    )
+    if admin_gate_ok:
+        if "subs_admin_ok" not in st.session_state:
             st.session_state["subs_admin_ok"] = False
-            st.error("Wrong password.")
-    if col_b.button("Lock", use_container_width=True):
-        st.session_state["subs_admin_ok"] = False
-        st.rerun()
-    if st.session_state["subs_admin_ok"]:
-        try:
-            emails = fetch_active_subscribers()
-        except Exception as e:
-            st.error(f"Could not load subscribers: {e}")
-            emails = []
-        st.caption(f"{len(emails)} active subscriber(s)")
-        st.write("\n".join(f"- {e}" for e in emails) if emails else "None yet.")
-        st.download_button(
-            label="⬇️ Download subscribers (CSV)",
-            data=_emails_to_csv_bytes(emails),
-            file_name="active_subscribers.csv",
-            mime="text/csv",
-            use_container_width=True,
+        admin_pw = st.text_input(
+            "Admin password",
+            type="password",
+            placeholder="••••••••",
+            label_visibility="collapsed",
         )
-    else:
-        st.caption("Admin-only")
+        col_a, col_b = st.columns(2)
+        if col_a.button("Unlock", use_container_width=True):
+            expected = st.secrets.get("ADMIN_SUBSCRIBERS_PASSWORD", "")
+            if expected and secrets.compare_digest(admin_pw or "", expected):
+                st.session_state["subs_admin_ok"] = True
+                st.rerun()
+            else:
+                st.session_state["subs_admin_ok"] = False
+                st.rerun()
+        if col_b.button("Lock", use_container_width=True):
+            st.session_state["subs_admin_ok"] = False
+            st.rerun()
+        if st.session_state["subs_admin_ok"]:
+            try:
+                emails = fetch_active_subscribers()
+            except Exception:
+                emails = []
+            st.download_button(
+                label="Download (CSV)",
+                data=_emails_to_csv_bytes(emails),
+                file_name="active_subscribers.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.caption(f"{len(emails)} active")
 def _ordinal_word(n: int) -> str:
     d = {1:"first",2:"second",3:"third"}
     if n in d: return d[n]

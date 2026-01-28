@@ -478,8 +478,8 @@ if not wkdf.empty:
     wkdf = wkdf[wkdf["complaint_id"].astype(str).str.match(r"^[67]\d{5,11}$", na=False)].copy()
     def map_bucket(section: str, source: str) -> str:
         src = (source or "").strip().upper()
-        if src == "Complaint Wizard":
-            return "Complaint Wizard"
+        if src == "CW":
+            return "CW"
         s = (section or "").strip().lower()
         if s.startswith("reportability"):      return "Reportability"
         if s.startswith("regulatory report"):  return "Regulatory Report"
@@ -491,7 +491,7 @@ if not wkdf.empty:
         return "PLI Level"
     wkdf.loc[:, "bucket"] = wkdf.apply(lambda r: map_bucket(r["section"], r["source"]), axis=1)
     palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                  "Product Analysis","Investigation","Communication","Task","PLI Level","Complaint Wizard"]
+                  "Product Analysis","Investigation","Communication","Task","PLI Level","CW"]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                     "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f","#17becf"]
     axis = alt.Axis(

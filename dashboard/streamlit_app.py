@@ -70,8 +70,10 @@ def fetch_active_subscribers() -> list[str]:
     return r.json()
 with st.sidebar:
     st.subheader("Active weekly subscribers")
+    sub_box = st.container()
     emails = fetch_active_subscribers()
-    st.write("\n".join(f"- {e}" for e in emails) if emails else "None yet.")
+    with sub_box:
+        st.write("\n".join(f"- {e}" for e in emails) if emails else "None yet.")
 def _ordinal_word(n: int) -> str:
     d = {1:"first",2:"second",3:"third"}
     if n in d: return d[n]

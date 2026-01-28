@@ -1,58 +1,27 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GCH/CW Timer</title>
-    <link rel="stylesheet" href="options.css" />
-  </head>
-  <body>
-    <main class="wrap">
-      <header class="header">
-        <div class="logo" aria-hidden="true">⏱️</div>
-        <div>
-          <h1>GCH/CW Timer</h1>
-          <p class="sub">Quick setup for tracking across GCH & Complaint Wizard.</p>
-        </div>
-      </header>
-      <section class="card">
-        <div class="field">
-          <label for="email">Work email</label>
-          <input id="email" type="email" placeholder="you@medtronic.com" autocomplete="email" />
-          <div class="hint">Used to attribute time to you in the dashboard.</div>
-        </div>
-        <div class="field">
-          <label for="team">Team</label>
-          <select id="team">
-            <option value="">Select your team…</option>
-            <option value="Aortic">Aortic</option>
-            <option value="CAS">CAS</option>
-            <option value="CRDN">CRDN</option>
-            <option value="ECT">ECT</option>
-            <option value="PVH">PVH</option>
-            <option value="SVT">SVT</option>
-            <option value="TCT">TCT</option>
-            <option value="CPT">CPT</option>
-            <option value="DS">DS</option>
-            <option value="PCS & CDS">PCS & CDS</option>
-            <option value="PM">PM</option>
-            <option value="MCS">MCS</option>
-          </select>
-          <div class="hint">This powers team-level filtering and rollups.</div>
-        </div>
-        <div class="actions">
-          <button id="save" class="btn" type="button">
-            <span class="btnDot" aria-hidden="true"></span>
-            Save settings
-          </button>
-          <span id="status" class="status" role="status" aria-live="polite"></span>
-        </div>
-      </section>
-      <footer class="foot">
-        <span class="pill">Local storage only</span>
-        <span class="pill">No passwords</span>
-      </footer>
-    </main>
-    <script src="options.js"></script>
-  </body>
-</html>
+<body>
+  <h1>GCH/CW Timer</h1>
+  <label>
+    Work email
+    <input id="email" type="email" placeholder="you@medtronic.com" />
+  </label>
+  <label>
+    Team
+    <select id="team">
+      <option value="">-- select Team --</option>
+      <option value="Aortic">Aortic</option>
+      <option value="CAS">CAS</option>
+      <option value="CRDN">CRDN</option>
+      <option value="ECT">ECT</option>
+      <option value="PVH">PVH</option>
+      <option value="SVT">SVT</option>
+      <option value="TCT">TCT</option>
+      <option value="CPT">CPT</option>
+      <option value="DS">DS</option>
+      <option value="PCS & CDS">PCS & CDS</option>
+      <option value="PM">PM</option>
+      <option value="MCS">MCS</option>
+    </select>
+  </label>
+  <button id="save">Save</button><span id="status" class="ok"></span>
+  <script src="options.js"></script>
+</body>

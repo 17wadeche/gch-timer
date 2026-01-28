@@ -227,18 +227,11 @@
       log("section:", section);
     }
     if(!started && complaintId && email && team && (isCW() || lastActivity)){
+      if (isCW() && !lastActivity) lastActivity = Date.now();
       lastTick = Date.now();
       started = true;
-      log("START session", {
-        complaintId,
-        source: getSource(),
-        email,
-        team,
-        section,
-        startedAt: new Date().toISOString(),
-        lastActivity: !!lastActivity
-      });
-      send("open");
+      log("START session", { complaintId, source: getSource(), email, team, section });
+      sendDelta("open");
     }
   }
   let panelRoot = null;
@@ -328,6 +321,7 @@
     setInterval(()=>accrue(),1000);
     setInterval(()=>{ accrue(); refreshKeys(); maybeSend("heartbeat"); },HEARTBEAT);
     document.addEventListener("visibilitychange",()=>{ accrue(); maybeSend("visibility"); });
-    window.addEventListener("beforeunload",()=>{ accrue(); send("unload",true); });
+    window.addEventListener("beforeunload",()=>{ accrue(); sendDelta("unload", true); });
+
   });
 })();

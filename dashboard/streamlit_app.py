@@ -491,7 +491,7 @@ if not wkdf.empty:
         return "PLI Level"
     wkdf.loc[:, "bucket"] = wkdf.apply(lambda r: map_bucket(r["section"], r["source"]), axis=1)
     palette_domain = ["Reportability","Regulatory Report","Regulatory Inquiry",
-                  "Product Analysis","Investigation","Communication","Task","PLI Level","CW"]
+                  "Product Analysis","Investigation","Communication","Task","PLI Level","Complaint Wizard"]
     palette_range  = ["#ff7f0e","#1f77b4","#2ca02c",
                     "#9467bd","#d62728","#8c564b","#e377c2","#7f7f7f","#17becf"]
     axis = alt.Axis(

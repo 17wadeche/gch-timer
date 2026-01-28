@@ -62,7 +62,7 @@ def fetch_sessions() -> pd.DataFrame:
         if c not in df.columns:
             df[c] = pd.Series(dtype="object")
     return df[schema]
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def fetch_active_subscribers() -> list[str]:
     token = st.secrets["SUBSCRIBERS_TOKEN"]
     r = requests.get(f"{API_BASE}/active_subscribers", params={"token": token}, timeout=TIMEOUT)
@@ -195,6 +195,11 @@ with st.sidebar:
                     else:
                         api_post("/unsubscribe", {"email": e})
                         st.success("Unsubscribed.")
+                    try:
+                        fetch_active_subscribers.clear()
+                    except Exception:
+                        pass
+                    st.rerun()
                 except Exception as ex:
                     st.error(str(ex))
 if ou_choice != "All Teams":

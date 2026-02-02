@@ -408,36 +408,49 @@ def _export_bytes() -> bytes:
            .to_excel(w, index=False, sheet_name="by_section"))
     out.seek(0)
     return out.read()
+from urllib.error import HTTPError
 def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
-    api_key = os.getenv("SENDGRID_API_KEY", "")
+    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("SENDGRID_API_KEY not set.")
-    if not (SMTP_FROM and recipients):
-        raise RuntimeError("From address or recipients missing.")
+        raise RuntimeError("SENDGRID_API_KEY not set (or empty).")
+    sendgrid_host = (os.getenv("SENDGRID_HOST") or "https://api.sendgrid.com").strip()
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import (
         Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
     )
     import base64
+    from_email = (SMTP_FROM or "").strip()
+    if not from_email:
+        raise RuntimeError("SMTP_FROM missing/empty.")
     message = Mail(
-        from_email=Email(SMTP_FROM, SMTP_FROM_NAME),   # <-- cwade1755@gmail.com (verified)
-        to_emails=recipients,                          # <-- chey.wade@medtronic.com
+        from_email=Email(from_email, SMTP_FROM_NAME),
+        to_emails=recipients,
         subject=subject,
         html_content="Weekly GCH timer export attached."
     )
-    message.reply_to = Email(SMTP_FROM)               # optional but nice
+    message.reply_to = Email(from_email)
     encoded = base64.b64encode(xlsx_bytes).decode("utf-8")
-    attachment = Attachment(
+    message.attachment = Attachment(
         FileContent(encoded),
         FileName("export.xlsx"),
         FileType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         Disposition("attachment"),
     )
-    message.attachment = attachment
-    sg = SendGridAPIClient(api_key)
-    resp = sg.send(message)
-    if resp.status_code not in (200, 202):
-        raise RuntimeError(f"SendGrid failed: {resp.status_code} {resp.body}")
+    sg = SendGridAPIClient(api_key, host=sendgrid_host)
+    try:
+        resp = sg.send(message)
+        if resp.status_code not in (200, 202):
+            raise RuntimeError(f"SendGrid failed: {resp.status_code} body={resp.body}")
+    except HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"SendGrid HTTPError {e.code} ({e.reason}). host={sendgrid_host} "
+            f"from={from_email} to={recipients} body={body}"
+        ) from e
 def weekly_rollup_job():
     try:
         recipients = [SMTP_TO]
@@ -450,5 +463,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=51)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=10, minute=30)
 scheduler.start()

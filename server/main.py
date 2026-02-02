@@ -144,7 +144,7 @@ SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "chey.wade@medtronic.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "chey.wade@medtronic.com")
+SMTP_FROM = os.getenv("SMTP_FROM", "cwade1755@gmail.com")
 SMTP_TO = "chey.wade@medtronic.com"
 ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
@@ -446,5 +446,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="fri", hour=17, minute=0)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=10)
 scheduler.start()

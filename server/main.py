@@ -446,5 +446,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=15)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=20)
 scheduler.start()

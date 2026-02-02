@@ -145,7 +145,8 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "cwade1755@gmail.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "cwade1755@gmail.com")
-SMTP_TO = "chey.wade@medtronic.com"
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Chey Wade")
+SMTP_TO = os.getenv("SMTP_TO", "chey.wade@medtronic.com")
 ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
@@ -378,7 +379,7 @@ def send_now(req: SendNowRequest):
     if not secrets.compare_digest((req.password or "").strip(), ADMIN_CLEAR_PASSWORD):
         raise HTTPException(status_code=403, detail="Invalid admin password.")
     try:
-        recipients = ["chey.wade@medtronic.com"]
+        recipients = req.recipients or [SMTP_TO]
         if not recipients:
             raise HTTPException(status_code=400, detail="No recipients configured/provided.")
         xlsx = _export_bytes()
@@ -414,14 +415,17 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
     if not (SMTP_FROM and recipients):
         raise RuntimeError("From address or recipients missing.")
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+    from sendgrid.helpers.mail import (
+        Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
+    )
     import base64
     message = Mail(
-        from_email=SMTP_FROM,
-        to_emails=recipients,
+        from_email=Email(SMTP_FROM, SMTP_FROM_NAME),   # <-- cwade1755@gmail.com (verified)
+        to_emails=recipients,                          # <-- chey.wade@medtronic.com
         subject=subject,
         html_content="Weekly GCH timer export attached."
     )
+    message.reply_to = Email(SMTP_FROM)               # optional but nice
     encoded = base64.b64encode(xlsx_bytes).decode("utf-8")
     attachment = Attachment(
         FileContent(encoded),
@@ -436,7 +440,7 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         raise RuntimeError(f"SendGrid failed: {resp.status_code} {resp.body}")
 def weekly_rollup_job():
     try:
-        recipients = ["chey.wade@medtronic.com"]
+        recipients = [SMTP_TO]
         xlsx = _export_bytes()
         now = datetime.now(TZ).strftime("%Y-%m-%d")
         _send_email(xlsx, f"GCH/CW Weekly Data Export – {now}", recipients)
@@ -446,5 +450,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=24)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=9, minute=38)
 scheduler.start()

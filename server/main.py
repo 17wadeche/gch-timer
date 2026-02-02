@@ -147,6 +147,10 @@ SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "cwade1755@gmail.com")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Chey Wade")
 SMTP_TO = os.getenv("SMTP_TO", "cwade1755@gmail.com")
+print(
+    f"[sendgrid] host={os.getenv('SENDGRID_HOST','(default)')} "
+    f"from={SMTP_FROM} to={SMTP_TO}"
+)
 ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
@@ -406,7 +410,7 @@ def _export_bytes() -> bytes:
            .to_excel(w, index=False, sheet_name="by_section"))
     out.seek(0)
     return out.read()
-from urllib.error import HTTPError
+from python_http_client.exceptions import HTTPError as SGHTTPError
 def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
     api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
     if not api_key:
@@ -426,7 +430,6 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         subject=subject,
         html_content="Weekly GCH timer export attached."
     )
-    message.reply_to = Email(from_email)
     encoded = base64.b64encode(xlsx_bytes).decode("utf-8")
     message.attachment = Attachment(
         FileContent(encoded),
@@ -439,15 +442,11 @@ def _send_email(xlsx_bytes: bytes, subject: str, recipients: list[str]):
         resp = sg.send(message)
         if resp.status_code not in (200, 202):
             raise RuntimeError(f"SendGrid failed: {resp.status_code} body={resp.body}")
-    except HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            pass
+    except SGHTTPError as e:
         raise RuntimeError(
-            f"SendGrid HTTPError {e.code} ({e.reason}). host={sendgrid_host} "
-            f"from={from_email} to={recipients} body={body}"
+            f"SendGrid SGHTTPError {getattr(e, 'status_code', None)} "
+            f"host={sendgrid_host} from={from_email} to={recipients} "
+            f"body={getattr(e, 'body', None)}"
         ) from e
 def weekly_rollup_job():
     try:
@@ -461,5 +460,5 @@ def weekly_rollup_job():
     except Exception as e:
         print(f"[weekly] ERROR: {e}")
 scheduler = BackgroundScheduler(timezone=TZ)
-scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=10, minute=40)
+scheduler.add_job(weekly_rollup_job, "cron", day_of_week="mon", hour=10, minute=45)
 scheduler.start()

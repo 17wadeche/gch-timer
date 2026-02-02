@@ -146,7 +146,7 @@ SMTP_USER = os.getenv("SMTP_USER", "cwade1755@gmail.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "cwade1755@gmail.com")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Chey Wade")
-SMTP_TO = os.getenv("SMTP_TO", "chey.wade@medtronic.com")
+SMTP_TO = os.getenv("SMTP_TO", "cwade1755@gmail.com")
 ADMIN_CLEAR_PASSWORD = os.getenv("ADMIN_CLEAR_PASSWORD", "start")
 TZ = pytz.timezone("America/Chicago")
 app = FastAPI(title="GCH Timer API")
@@ -196,8 +196,6 @@ def _validate_email(e: str) -> str:
     e = _norm_email(e)
     if not EMAIL_RE.match(e):
         raise HTTPException(status_code=400, detail="Invalid email address.")
-    if not e.endswith("@medtronic.com"):
-        raise HTTPException(status_code=400, detail="Use your @medtronic.com email.")
     return e
 @app.post("/subscribe")
 def subscribe(req: SubscribeRequest):
